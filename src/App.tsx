@@ -1,10 +1,9 @@
-
 import { useEffect, useState, type FormEvent } from "react";
 import {
   LayoutDashboard, CalendarDays, BookOpen, ClipboardList,
-  ClipboardCheck, Settings, Search, Bell, Plus, Clock, MapPin,
-  CheckCircle2, Pencil, Trash2, X, Save, ArrowLeft, LogOut,
-  Lock, Mail, User, GraduationCap
+  ClipboardCheck, Settings, Search, Plus, Clock, MapPin,
+  CheckCircle2, Pencil, Trash2, X, Save, LogOut, User,
+  Mail, Lock, AlertTriangle, History, Printer
 } from "lucide-react";
 import "./App.css";
 
@@ -21,40 +20,60 @@ type Account = {
   password: string;
 };
 
+type Slot = {
+  id: number;
+  courseId: number;
+  day: string;
+  start: string;
+  end: string;
+  room: string;
+};
+
+type Assignment = {
+  id: number;
+  title: string;
+  courseId: number;
+  type: string;
+  dueDate: string;
+  dueTime: string;
+  completed: boolean;
+};
+
+type AttendanceRecord = {
+  id: number;
+  courseId: number;
+  date: string;
+  status: "Present" | "Absent";
+};
+
 const initialCourses: Course[] = [
   { id: 1, code: "CS301", name: "Data Warehousing", color: "#8974e8" },
   { id: 2, code: "CS402", name: "Deep Learning", color: "#55a8e9" },
   { id: 3, code: "CS305", name: "Web Programming", color: "#efa45f" }
 ];
 
-const classes = [
-  { time: "09:00 - 10:30", name: "Data Warehousing", room: "Room 204", color: "purple" },
-  { time: "11:00 - 12:30", name: "Deep Learning", room: "Lab 3", color: "blue" },
-  { time: "01:00 - 02:30", name: "Web Programming", room: "Room 105", color: "orange" }
+const weekdays = [
+  "Monday", "Tuesday", "Wednesday",
+  "Thursday", "Friday", "Saturday"
 ];
 
-const deadlines = [
-  { title: "Web Programming Project", course: "Web Programming", date: "Nov 07", type: "Project" },
-  { title: "Deep Learning Quiz", course: "Deep Learning", date: "Nov 09", type: "Quiz" },
-  { title: "Database Assignment", course: "DBMS", date: "Nov 12", type: "Assignment" }
-];
+const readStorage = <T,>(key: string, fallback: T): T => {
+  try {
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) as T : fallback;
+  } catch {
+    return fallback;
+  }
+};
 
 function App() {
-  const [accounts, setAccounts] = useState<Account[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("semestersync_accounts") || "[]");
-    } catch {
-      return [];
-    }
-  });
+  const [accounts, setAccounts] = useState<Account[]>(() =>
+    readStorage("semestersync_accounts", [])
+  );
 
-  const [currentUser, setCurrentUser] = useState<Account | null>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("semestersync_user") || "null");
-    } catch {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState<Account | null>(() =>
+    readStorage<Account | null>("semestersync_user", null)
+  );
 
   const [authPage, setAuthPage] = useState<"login" | "signup">("login");
   const [authName, setAuthName] = useState("");
@@ -63,314 +82,434 @@ function App() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [authError, setAuthError] = useState("");
 
-  const [courses, setCourses] = useState<Course[]>(() => {
-    try {
-      const saved = localStorage.getItem("semestersync_courses");
-      return saved ? JSON.parse(saved) : initialCourses;
-    } catch {
-      return initialCourses;
-    }
-  });
+  const [courses, setCourses] = useState<Course[]>(() =>
+    readStorage("semestersync_courses", initialCourses)
+  );
+
+  const [slots, setSlots] = useState<Slot[]>(() =>
+    readStorage("semestersync_slots", [])
+  );
+
+  const [assignments, setAssignments] = useState<Assignment[]>(() =>
+    readStorage("semestersync_assignments", [])
+  );
+
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() =>
+    readStorage("semestersync_attendance", [])
+  );
 
   const [activePage, setActivePage] = useState("Dashboard");
-  const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const [showCourseModal, setShowCourseModal] = useState(false);
+  const [editingCourseId, setEditingCourseId] = useState<number | null>(null);
   const [courseName, setCourseName] = useState("");
   const [courseCode, setCourseCode] = useState("");
   const [courseColor, setCourseColor] = useState("#8974e8");
-  const [searchTerm, setSearchTerm] = useState("");
+
+  const [showSlotForm, setShowSlotForm] = useState(false);
+  const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
+  const [slotCourse, setSlotCourse] = useState("");
+  const [slotDay, setSlotDay] = useState("Monday");
+  const [slotStart, setSlotStart] = useState("09:00");
+  const [slotEnd, setSlotEnd] = useState("10:00");
+  const [slotRoom, setSlotRoom] = useState("");
+  const [slotError, setSlotError] = useState("");
+
+  const [showAssignmentForm, setShowAssignmentForm] = useState(false);
+  const [editingAssignmentId, setEditingAssignmentId] = useState<number | null>(null);
+  const [assignmentTitle, setAssignmentTitle] = useState("");
+  const [assignmentCourse, setAssignmentCourse] = useState("");
+  const [assignmentType, setAssignmentType] = useState("Assignment");
+  const [assignmentDate, setAssignmentDate] = useState("");
+  const [assignmentTime, setAssignmentTime] = useState("23:59");
+
+  const [attendanceCourse, setAttendanceCourse] = useState("");
+  const [attendanceDate, setAttendanceDate] = useState(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [historyCourseFilter, setHistoryCourseFilter] = useState("all");
 
   useEffect(() => {
     localStorage.setItem("semestersync_accounts", JSON.stringify(accounts));
   }, [accounts]);
 
   useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem("semestersync_user", JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem("semestersync_user");
-    }
+    localStorage.setItem("semestersync_user", JSON.stringify(currentUser));
   }, [currentUser]);
 
   useEffect(() => {
     localStorage.setItem("semestersync_courses", JSON.stringify(courses));
   }, [courses]);
 
-  const handleSignup = (e: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    localStorage.setItem("semestersync_slots", JSON.stringify(slots));
+  }, [slots]);
+
+  useEffect(() => {
+    localStorage.setItem("semestersync_assignments", JSON.stringify(assignments));
+  }, [assignments]);
+
+  useEffect(() => {
+    localStorage.setItem("semestersync_attendance", JSON.stringify(attendance));
+  }, [attendance]);
+
+  const getCourse = (id: number) =>
+    courses.find(course => course.id === id);
+
+  // Current date and time
+  const now = new Date();
+
+  const todayName = now.toLocaleDateString("en-US", {
+    weekday: "long"
+  });
+
+  const todayDateString = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0")
+  ].join("-");
+
+  const currentTimeString = [
+    String(now.getHours()).padStart(2, "0"),
+    String(now.getMinutes()).padStart(2, "0")
+  ].join(":");
+
+  const todaySlots = slots
+    .filter(slot => slot.day === todayName)
+    .sort((a, b) => a.start.localeCompare(b.start));
+
+  const pendingAssignments = assignments.filter(
+    item => !item.completed
+  );
+
+  // Check whether a pending assignment is overdue
+  const isOverdue = (item: Assignment) => {
+    if (!item.dueDate) return false;
+
+    if (item.dueDate < todayDateString) return true;
+
+    if (item.dueDate === todayDateString) {
+      return item.dueTime < currentTimeString;
+    }
+
+    return false;
+  };
+
+  // Pending deadlines whose due date/time has passed
+  const overdueAssignments = pendingAssignments
+    .filter(isOverdue)
+    .sort((a, b) =>
+      `${a.dueDate} ${a.dueTime}`.localeCompare(
+        `${b.dueDate} ${b.dueTime}`
+      )
+    );
+
+  // Pending deadlines that are still upcoming
+  const upcomingAssignments = pendingAssignments
+    .filter(item => !isOverdue(item))
+    .sort((a, b) =>
+      `${a.dueDate} ${a.dueTime}`.localeCompare(
+        `${b.dueDate} ${b.dueTime}`
+      )
+    );
+
+  const attendancePercentage = (courseId?: number) => {
+    const records = attendance.filter(record =>
+      courseId === undefined || record.courseId === courseId
+    );
+
+    if (!records.length) return 0;
+
+    const present = records.filter(
+      record => record.status === "Present"
+    ).length;
+
+    return Math.round((present / records.length) * 100);
+  };
+
+  const handleAuth = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setAuthError("");
 
-    if (!authName.trim() || !authEmail.trim() || !authPassword) {
-      setAuthError("Please fill in all fields.");
-      return;
+    if (authPage === "signup") {
+      if (authPassword !== confirmPassword) {
+        setAuthError("Passwords do not match.");
+        return;
+      }
+
+      if (accounts.some(account =>
+        account.email.toLowerCase() === authEmail.trim().toLowerCase()
+      )) {
+        setAuthError("An account with this email already exists.");
+        return;
+      }
+
+      const newAccount: Account = {
+        name: authName.trim(),
+        email: authEmail.trim().toLowerCase(),
+        password: authPassword
+      };
+
+      setAccounts(previous => [...previous, newAccount]);
+      setCurrentUser(newAccount);
+      setActivePage("Dashboard");
+    } else {
+      const account = accounts.find(item =>
+        item.email.toLowerCase() === authEmail.trim().toLowerCase() &&
+        item.password === authPassword
+      );
+
+      if (!account) {
+        setAuthError("Incorrect email or password.");
+        return;
+      }
+
+      setCurrentUser(account);
+      setActivePage("Dashboard");
     }
 
-    if (authPassword.length < 6) {
-      setAuthError("Password must contain at least 6 characters.");
-      return;
-    }
-
-    if (authPassword !== confirmPassword) {
-      setAuthError("Passwords do not match.");
-      return;
-    }
-
-    const exists = accounts.some(
-      account => account.email.toLowerCase() === authEmail.trim().toLowerCase()
-    );
-
-    if (exists) {
-      setAuthError("An account with this email already exists. Please login.");
-      return;
-    }
-
-    const newAccount: Account = {
-      name: authName.trim(),
-      email: authEmail.trim().toLowerCase(),
-      password: authPassword
-    };
-
-    setAccounts(previous => [...previous, newAccount]);
-    setCurrentUser(newAccount);
-    setActivePage("Dashboard");
     setAuthName("");
     setAuthEmail("");
     setAuthPassword("");
     setConfirmPassword("");
   };
 
-  const handleLogin = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setAuthError("");
-
-    const account = accounts.find(
-      item =>
-        item.email === authEmail.trim().toLowerCase() &&
-        item.password === authPassword
-    );
-
-    if (!account) {
-      setAuthError("Invalid email or password. Please try again.");
-      return;
-    }
-
-    setCurrentUser(account);
-    setActivePage("Dashboard");
-    setAuthEmail("");
-    setAuthPassword("");
-  };
-
-  const handleLogout = () => {
+  const logout = () => {
     setCurrentUser(null);
     setActivePage("Dashboard");
     setAuthPage("login");
     setAuthError("");
-    setAuthPassword("");
-    setConfirmPassword("");
   };
 
-  const openAddModal = () => {
-    setEditingId(null);
-    setCourseName("");
-    setCourseCode("");
-    setCourseColor("#8974e8");
-    setShowModal(true);
-  };
-
-  const openEditModal = (course: Course) => {
-    setEditingId(course.id);
-    setCourseName(course.name);
-    setCourseCode(course.code);
-    setCourseColor(course.color);
-    setShowModal(true);
+  const openCourseForm = (course?: Course) => {
+    setEditingCourseId(course?.id ?? null);
+    setCourseName(course?.name ?? "");
+    setCourseCode(course?.code ?? "");
+    setCourseColor(course?.color ?? "#8974e8");
+    setShowCourseModal(true);
   };
 
   const saveCourse = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!courseName.trim() || !courseCode.trim()) {
-      alert("Please enter both course name and course code.");
-      return;
-    }
-
-    const duplicate = courses.some(
-      course =>
-        course.code.toLowerCase() === courseCode.trim().toLowerCase() &&
-        course.id !== editingId
-    );
-
-    if (duplicate) {
+    if (courses.some(course =>
+      course.code.toLowerCase() === courseCode.trim().toLowerCase() &&
+      course.id !== editingCourseId
+    )) {
       alert("A course with this code already exists.");
       return;
     }
 
-    if (editingId !== null) {
-      setCourses(previous =>
-        previous.map(course =>
-          course.id === editingId
-            ? {
-                ...course,
-                name: courseName.trim(),
-                code: courseCode.trim().toUpperCase(),
-                color: courseColor
-              }
-            : course
-        )
-      );
+    if (editingCourseId !== null) {
+      setCourses(previous => previous.map(course =>
+        course.id === editingCourseId
+          ? {
+              ...course,
+              name: courseName.trim(),
+              code: courseCode.trim().toUpperCase(),
+              color: courseColor
+            }
+          : course
+      ));
     } else {
-      const newCourse: Course = {
+      setCourses(previous => [...previous, {
         id: Date.now(),
         name: courseName.trim(),
         code: courseCode.trim().toUpperCase(),
         color: courseColor
-      };
-      setCourses(previous => [...previous, newCourse]);
+      }]);
     }
 
-    setShowModal(false);
+    setShowCourseModal(false);
   };
 
   const deleteCourse = (id: number) => {
-    if (window.confirm("Are you sure you want to delete this course?")) {
-      setCourses(previous => previous.filter(course => course.id !== id));
+    if (!window.confirm(
+      "Delete this course and its related timetable, assignments and attendance?"
+    )) return;
+
+    setCourses(previous => previous.filter(course => course.id !== id));
+    setSlots(previous => previous.filter(slot => slot.courseId !== id));
+    setAssignments(previous => previous.filter(item => item.courseId !== id));
+    setAttendance(previous => previous.filter(record => record.courseId !== id));
+  };
+
+  const openSlotForm = (slot?: Slot) => {
+    setEditingSlotId(slot?.id ?? null);
+    setSlotCourse(String(slot?.courseId ?? courses[0]?.id ?? ""));
+    setSlotDay(slot?.day ?? "Monday");
+    setSlotStart(slot?.start ?? "09:00");
+    setSlotEnd(slot?.end ?? "10:00");
+    setSlotRoom(slot?.room ?? "");
+    setSlotError("");
+    setShowSlotForm(true);
+  };
+
+  const saveSlot = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSlotError("");
+
+    if (!slotCourse) {
+      setSlotError("Please add a course first.");
+      return;
+    }
+
+    if (slotStart >= slotEnd) {
+      setSlotError("End time must be later than start time.");
+      return;
+    }
+
+    const clash = slots.find(slot =>
+      slot.id !== editingSlotId &&
+      slot.day === slotDay &&
+      slotStart < slot.end &&
+      slotEnd > slot.start
+    );
+
+    if (clash) {
+      const clashCourse = getCourse(clash.courseId);
+
+      setSlotError(
+        `Schedule clash! This time overlaps with ${clashCourse?.name ?? "another class"} (${clash.start} - ${clash.end}).`
+      );
+      return;
+    }
+
+    const newSlot: Slot = {
+      id: editingSlotId ?? Date.now(),
+      courseId: Number(slotCourse),
+      day: slotDay,
+      start: slotStart,
+      end: slotEnd,
+      room: slotRoom.trim()
+    };
+
+    if (editingSlotId !== null) {
+      setSlots(previous => previous.map(slot =>
+        slot.id === editingSlotId ? newSlot : slot
+      ));
+    } else {
+      setSlots(previous => [...previous, newSlot]);
+    }
+
+    setShowSlotForm(false);
+  };
+
+  const deleteSlot = (id: number) => {
+    if (window.confirm("Delete this class slot?")) {
+      setSlots(previous => previous.filter(slot => slot.id !== id));
+    }
+  };
+
+  const openAssignmentForm = (item?: Assignment) => {
+    setEditingAssignmentId(item?.id ?? null);
+    setAssignmentTitle(item?.title ?? "");
+    setAssignmentCourse(String(item?.courseId ?? courses[0]?.id ?? ""));
+    setAssignmentType(item?.type ?? "Assignment");
+    setAssignmentDate(item?.dueDate ?? "");
+    setAssignmentTime(item?.dueTime ?? "23:59");
+    setShowAssignmentForm(true);
+  };
+
+  const saveAssignment = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!assignmentCourse) {
+      alert("Please add a course first.");
+      return;
+    }
+
+    const newItem: Assignment = {
+      id: editingAssignmentId ?? Date.now(),
+      title: assignmentTitle.trim(),
+      courseId: Number(assignmentCourse),
+      type: assignmentType,
+      dueDate: assignmentDate,
+      dueTime: assignmentTime,
+      completed: editingAssignmentId !== null
+        ? assignments.find(item =>
+            item.id === editingAssignmentId
+          )?.completed ?? false
+        : false
+    };
+
+    if (editingAssignmentId !== null) {
+      setAssignments(previous => previous.map(item =>
+        item.id === editingAssignmentId ? newItem : item
+      ));
+    } else {
+      setAssignments(previous => [...previous, newItem]);
+    }
+
+    setShowAssignmentForm(false);
+  };
+
+  const deleteAssignment = (id: number) => {
+    if (window.confirm("Delete this deadline?")) {
+      setAssignments(previous =>
+        previous.filter(item => item.id !== id)
+      );
+    }
+  };
+
+  const toggleAssignment = (id: number) => {
+    setAssignments(previous => previous.map(item =>
+      item.id === id
+        ? { ...item, completed: !item.completed }
+        : item
+    ));
+  };
+
+  const markAttendance = (status: "Present" | "Absent") => {
+    if (!attendanceCourse) {
+      alert("Please select a course.");
+      return;
+    }
+
+    const courseId = Number(attendanceCourse);
+
+    const existing = attendance.find(record =>
+      record.courseId === courseId &&
+      record.date === attendanceDate
+    );
+
+    if (existing) {
+      setAttendance(previous => previous.map(record =>
+        record.id === existing.id
+          ? { ...record, status }
+          : record
+      ));
+    } else {
+      setAttendance(previous => [...previous, {
+        id: Date.now(),
+        courseId,
+        date: attendanceDate,
+        status
+      }]);
+    }
+  };
+
+  const deleteAttendance = (id: number) => {
+    if (window.confirm("Delete this attendance record?")) {
+      setAttendance(previous =>
+        previous.filter(record => record.id !== id)
+      );
     }
   };
 
   const filteredCourses = courses.filter(course =>
-    `${course.name} ${course.code}`.toLowerCase().includes(searchTerm.toLowerCase())
+    `${course.name} ${course.code}`
+      .toLowerCase()
+      .includes(searchTerm.toLowerCase())
   );
 
-  if (!currentUser) {
-    return (
-      <div className="auth-page">
-        <div className="auth-brand">
-          <div className="brand-icon">S</div>
-          <span>Semester<span className="brand-light">Sync</span></span>
-        </div>
-
-        <div className="auth-card">
-          <div className="auth-icon">
-            <GraduationCap size={30} />
-          </div>
-
-          <h1>{authPage === "login" ? "Welcome Back!" : "Create Your Account"}</h1>
-          <p className="auth-subtitle">
-            {authPage === "login"
-              ? "Login to manage your semester."
-              : "Start organizing your academic life."}
-          </p>
-
-          <div className="auth-tabs">
-            <button
-              className={authPage === "login" ? "auth-tab active" : "auth-tab"}
-              onClick={() => {
-                setAuthPage("login");
-                setAuthError("");
-              }}
-              type="button"
-            >
-              Login
-            </button>
-            <button
-              className={authPage === "signup" ? "auth-tab active" : "auth-tab"}
-              onClick={() => {
-                setAuthPage("signup");
-                setAuthError("");
-              }}
-              type="button"
-            >
-              Sign Up
-            </button>
-          </div>
-
-          <form onSubmit={authPage === "login" ? handleLogin : handleSignup}>
-            {authPage === "signup" && (
-              <>
-                <label htmlFor="authName">Full Name</label>
-                <div className="auth-input-wrap">
-                  <User size={18} />
-                  <input
-                    id="authName"
-                    type="text"
-                    placeholder="Enter your full name"
-                    value={authName}
-                    onChange={e => setAuthName(e.target.value)}
-                    required
-                  />
-                </div>
-              </>
-            )}
-
-            <label htmlFor="authEmail">Email Address</label>
-            <div className="auth-input-wrap">
-              <Mail size={18} />
-              <input
-                id="authEmail"
-                type="email"
-                placeholder="student@example.com"
-                value={authEmail}
-                onChange={e => setAuthEmail(e.target.value)}
-                required
-              />
-            </div>
-
-            <label htmlFor="authPassword">Password</label>
-            <div className="auth-input-wrap">
-              <Lock size={18} />
-              <input
-                id="authPassword"
-                type="password"
-                placeholder="Enter your password"
-                value={authPassword}
-                onChange={e => setAuthPassword(e.target.value)}
-                required
-              />
-            </div>
-
-            {authPage === "signup" && (
-              <>
-                <label htmlFor="confirmPassword">Confirm Password</label>
-                <div className="auth-input-wrap">
-                  <Lock size={18} />
-                  <input
-                    id="confirmPassword"
-                    type="password"
-                    placeholder="Confirm your password"
-                    value={confirmPassword}
-                    onChange={e => setConfirmPassword(e.target.value)}
-                    required
-                  />
-                </div>
-              </>
-            )}
-
-            {authError && <div className="auth-error">{authError}</div>}
-
-            <button className="auth-submit" type="submit">
-              {authPage === "login" ? "Login to Dashboard" : "Create Account"}
-            </button>
-          </form>
-
-          <p className="auth-switch">
-            {authPage === "login"
-              ? "Don't have an account?"
-              : "Already have an account?"}
-            <button
-              type="button"
-              onClick={() => {
-                setAuthPage(authPage === "login" ? "signup" : "login");
-                setAuthError("");
-              }}
-            >
-              {authPage === "login" ? " Sign Up" : " Login"}
-            </button>
-          </p>
-        </div>
-
-        <p className="auth-footer">© 2026 SemesterSync. Organize your semester smarter.</p>
-      </div>
-    );
-  }
+  const filteredHistory = attendance
+    .filter(record =>
+      historyCourseFilter === "all" ||
+      record.courseId === Number(historyCourseFilter)
+    )
+    .sort((a, b) => b.date.localeCompare(a.date));
 
   const renderDashboard = () => (
     <>
@@ -379,7 +518,10 @@ function App() {
           <span className="welcome-tag">YOUR ACADEMIC SPACE</span>
           <h1>Stay organized.<br />Stay ahead.</h1>
           <p>Manage your classes, deadlines and attendance all in one place.</p>
-          <button className="primary-button" onClick={openAddModal}>
+          <button
+            className="primary-button"
+            onClick={() => openCourseForm()}
+          >
             <Plus size={18} /> Add New Course
           </button>
         </div>
@@ -388,40 +530,74 @@ function App() {
 
       <section className="stats-grid">
         <div className="stat-card">
-          <div className="stat-top"><span>Total Courses</span><BookOpen /></div>
+          <div className="stat-top">
+            <span>Total Courses</span><BookOpen />
+          </div>
           <h2>{String(courses.length).padStart(2, "0")}</h2>
           <small>Active this semester</small>
         </div>
+
         <div className="stat-card">
-          <div className="stat-top"><span>Today's Classes</span><CalendarDays /></div>
-          <h2>03</h2>
+          <div className="stat-top">
+            <span>Today's Classes</span><CalendarDays />
+          </div>
+          <h2>{String(todaySlots.length).padStart(2, "0")}</h2>
           <small>Scheduled for today</small>
         </div>
+
         <div className="stat-card">
-          <div className="stat-top"><span>Pending Tasks</span><ClipboardList /></div>
-          <h2>05</h2>
-          <small>Need your attention</small>
+          <div className="stat-top">
+            <span>Pending Tasks</span><ClipboardList />
+          </div>
+          <h2>{String(pendingAssignments.length).padStart(2, "0")}</h2>
+          <small>
+            {overdueAssignments.length > 0
+              ? `${overdueAssignments.length} overdue deadline(s)`
+              : "All tasks on track"}
+          </small>
         </div>
+
         <div className="stat-card">
-          <div className="stat-top"><span>Attendance</span><CheckCircle2 /></div>
-          <h2>87%</h2>
-          <small>Overall attendance</small>
+          <div className="stat-top">
+            <span>Attendance</span><CheckCircle2 />
+          </div>
+          <h2>{attendancePercentage()}%</h2>
+          <small>Based on recorded sessions</small>
         </div>
       </section>
 
       <section className="content-grid">
         <div className="content-card">
           <div className="section-heading">
-            <div><h3>Today's Schedule</h3><p>Your classes for today</p></div>
-            <a href="#" onClick={e => e.preventDefault()}>View Timetable</a>
+            <div>
+              <h3>Today's Schedule</h3>
+              <p>Your classes for today</p>
+            </div>
+            <button
+              className="text-link"
+              onClick={() => setActivePage("Timetable")}
+            >
+              View Timetable
+            </button>
           </div>
-          {classes.map((item, index) => (
-            <div className="class-item" key={index}>
-              <div className={`class-indicator ${item.color}`} />
+
+          {todaySlots.length === 0 ? (
+            <p className="module-empty">
+              No classes scheduled for today.
+            </p>
+          ) : todaySlots.map(slot => (
+            <div className="class-item" key={slot.id}>
+              <div className="class-indicator purple" />
               <div className="class-details">
-                <strong>{item.name}</strong>
-                <small><Clock size={13} /> {item.time}</small>
-                <small><MapPin size={13} /> {item.room}</small>
+                <strong>
+                  {getCourse(slot.courseId)?.name ?? "Course"}
+                </strong>
+                <small>
+                  <Clock size={13} /> {slot.start} - {slot.end}
+                </small>
+                <small>
+                  <MapPin size={13} /> {slot.room || "Room not specified"}
+                </small>
               </div>
               <span className="class-status">Class</span>
             </div>
@@ -430,22 +606,56 @@ function App() {
 
         <div className="content-card">
           <div className="section-heading">
-            <div><h3>Upcoming Deadlines</h3><p>Don't miss your submissions</p></div>
-            <a href="#" onClick={e => e.preventDefault()}>View All</a>
+            <div>
+              <h3>Upcoming Deadlines</h3>
+              <p>Don't miss your submissions</p>
+            </div>
+            <button
+              className="text-link"
+              onClick={() => setActivePage("Assignments")}
+            >
+              View All
+            </button>
           </div>
-          {deadlines.map((item, index) => (
-            <div className="deadline-item" key={index}>
+
+          {upcomingAssignments.slice(0, 4).map(item => (
+            <div className="deadline-item" key={item.id}>
               <div className="date-box">
-                <strong>{item.date.split(" ")[1]}</strong>
-                <small>{item.date.split(" ")[0]}</small>
+                <strong>
+                  {item.dueDate ? item.dueDate.slice(8, 10) : "--"}
+                </strong>
+                <small>
+                  {item.dueDate
+                    ? new Date(`${item.dueDate}T00:00:00`)
+                        .toLocaleString("en-US", { month: "short" })
+                    : "Date"}
+                </small>
               </div>
+
               <div className="deadline-details">
                 <strong>{item.title}</strong>
-                <small>{item.course}</small>
+                <small>
+                  {getCourse(item.courseId)?.name ?? "Course"}
+                </small>
                 <span>{item.type}</span>
               </div>
             </div>
           ))}
+
+          {upcomingAssignments.length === 0 && (
+            <p className="module-empty">
+              {pendingAssignments.length === 0
+                ? "No pending deadlines. You're all caught up!"
+                : "No upcoming deadlines. Check your overdue tasks."}
+            </p>
+          )}
+
+          {overdueAssignments.length > 0 && (
+            <p className="module-hint">
+              You also have {overdueAssignments.length} overdue deadline(s).
+              Check your Assignments page.
+            </p>
+          )}
         </div>
       </section>
     </>
@@ -454,8 +664,14 @@ function App() {
   const renderCourses = () => (
     <section className="courses-page">
       <div className="courses-toolbar">
-        <div><h3>My Courses</h3><p>Manage all your semester courses in one place.</p></div>
-        <button className="primary-button" onClick={openAddModal}>
+        <div>
+          <h3>My Courses</h3>
+          <p>Manage all your semester courses.</p>
+        </div>
+        <button
+          className="primary-button"
+          onClick={() => openCourseForm()}
+        >
           <Plus size={18} /> Add Course
         </button>
       </div>
@@ -463,7 +679,6 @@ function App() {
       <div className="course-search">
         <Search size={19} />
         <input
-          type="text"
           placeholder="Search by course name or code..."
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
@@ -471,7 +686,10 @@ function App() {
       </div>
 
       <div className="course-summary">
-        <div><span>Total Registered Courses</span><h2>{courses.length}</h2></div>
+        <div>
+          <span>Total Registered Courses</span>
+          <h2>{courses.length}</h2>
+        </div>
         <BookOpen size={27} />
       </div>
 
@@ -479,27 +697,41 @@ function App() {
         <div className="empty-state">
           <BookOpen size={38} />
           <h3>No courses found</h3>
-          <p>Add a new course or change your search.</p>
+          <p>Add a course or change your search.</p>
         </div>
       ) : (
         <div className="courses-grid">
           {filteredCourses.map(course => (
             <div className="course-card" key={course.id}>
-              <div className="course-color-bar" style={{ backgroundColor: course.color }} />
+              <div
+                className="course-color-bar"
+                style={{ backgroundColor: course.color }}
+              />
               <div className="course-card-content">
                 <div className="course-card-top">
-                  <div className="course-icon" style={{
-                    backgroundColor: `${course.color}20`, color: course.color
-                  }}>
+                  <div
+                    className="course-icon"
+                    style={{
+                      backgroundColor: `${course.color}20`,
+                      color: course.color
+                    }}
+                  >
                     <BookOpen size={23} />
                   </div>
                   <span className="course-code">{course.code}</span>
                 </div>
+
                 <h3>{course.name}</h3>
                 <p>Registered course</p>
+
                 <div className="course-actions">
-                  <button onClick={() => openEditModal(course)}><Pencil size={15} /> Edit</button>
-                  <button className="delete-action" onClick={() => deleteCourse(course.id)}>
+                  <button onClick={() => openCourseForm(course)}>
+                    <Pencil size={15} /> Edit
+                  </button>
+                  <button
+                    className="delete-action"
+                    onClick={() => deleteCourse(course.id)}
+                  >
                     <Trash2 size={15} /> Delete
                   </button>
                 </div>
@@ -511,52 +743,566 @@ function App() {
     </section>
   );
 
+  const renderTimetable = () => (
+    <section className="module-page">
+      <div className="module-toolbar">
+        <div>
+          <h3>Weekly Timetable</h3>
+          <p>Plan and manage your weekly classes.</p>
+        </div>
+        <div className="toolbar-actions">
+          <button
+            className="secondary-button"
+            onClick={() => window.print()}
+          >
+            <Printer size={16} /> Print
+          </button>
+          <button
+            className="primary-button"
+            onClick={() => openSlotForm()}
+          >
+            <Plus size={17} /> Add Class
+          </button>
+        </div>
+      </div>
+
+      {weekdays.map(day => {
+        const daySlots = slots
+          .filter(slot => slot.day === day)
+          .sort((a, b) => a.start.localeCompare(b.start));
+
+        return (
+          <div className="day-section" key={day}>
+            <h4>{day}</h4>
+
+            {daySlots.length === 0 ? (
+              <p className="module-empty">No classes scheduled.</p>
+            ) : daySlots.map(slot => (
+              <div className="module-item" key={slot.id}>
+                <div
+                  className="module-item-color"
+                  style={{
+                    background: getCourse(slot.courseId)?.color ?? "#8974e8"
+                  }}
+                />
+                <div className="module-item-main">
+                  <strong>
+                    {getCourse(slot.courseId)?.name ?? "Course removed"}
+                  </strong>
+                  <span>
+                    {getCourse(slot.courseId)?.code} · {slot.room || "Room not specified"}
+                  </span>
+                </div>
+                <div className="module-time">
+                  <Clock size={14} /> {slot.start} - {slot.end}
+                </div>
+                <div className="module-item-actions">
+                  <button
+                    onClick={() => openSlotForm(slot)}
+                    aria-label="Edit class"
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    onClick={() => deleteSlot(slot.id)}
+                    aria-label="Delete class"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {slots.length === 0 && (
+        <p className="module-hint">
+          Add your first class to start building your timetable.
+        </p>
+      )}
+    </section>
+  );
+
+  const renderAssignments = () => (
+    <section className="module-page">
+      <div className="module-toolbar">
+        <div>
+          <h3>Assignments & Exams</h3>
+          <p>Track your academic deadlines and progress.</p>
+        </div>
+        <button
+          className="primary-button"
+          onClick={() => openAssignmentForm()}
+        >
+          <Plus size={17} /> Add Deadline
+        </button>
+      </div>
+
+      <div className="module-summary-row">
+        <div className="mini-summary">
+          <span>Total</span>
+          <strong>{assignments.length}</strong>
+        </div>
+        <div className="mini-summary">
+          <span>Pending</span>
+          <strong>{pendingAssignments.length}</strong>
+        </div>
+        <div className="mini-summary">
+          <span>Completed</span>
+          <strong>{assignments.length - pendingAssignments.length}</strong>
+        </div>
+      </div>
+
+      {assignments.length === 0 ? (
+        <div className="empty-state">
+          <ClipboardList size={35} />
+          <h3>No deadlines yet</h3>
+          <p>Add your assignments, quizzes and exams.</p>
+        </div>
+      ) : (
+        [...assignments]
+          .sort((a, b) =>
+            `${a.dueDate} ${a.dueTime}`.localeCompare(
+              `${b.dueDate} ${b.dueTime}`
+            )
+          )
+          .map(item => (
+            <div
+              className={`module-item assignment-item ${item.completed ? "is-completed" : ""}`}
+              key={item.id}
+            >
+              <div className="assignment-check">
+                <input
+                  type="checkbox"
+                  checked={item.completed}
+                  onChange={() => toggleAssignment(item.id)}
+                />
+              </div>
+
+              <div className="module-item-main">
+                <strong>{item.title}</strong>
+                <span>
+                  {getCourse(item.courseId)?.name ?? "Course"} · {item.type}
+                </span>
+                {!item.completed && isOverdue(item) && (
+                  <span className="overdue-label">Overdue</span>
+                )}
+              </div>
+
+              <div className="module-time">
+                <CalendarDays size={14} />
+                {item.dueDate} at {item.dueTime}
+              </div>
+
+              <div className="module-item-actions">
+                <button
+                  onClick={() => openAssignmentForm(item)}
+                  aria-label="Edit deadline"
+                >
+                  <Pencil size={15} />
+                </button>
+                <button
+                  onClick={() => deleteAssignment(item.id)}
+                  aria-label="Delete deadline"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            </div>
+          ))
+      )}
+    </section>
+  );
+
+  const renderAttendance = () => (
+    <section className="module-page">
+      <div className="module-toolbar">
+        <div>
+          <h3>Attendance Tracker</h3>
+          <p>Mark attendance and review your attendance history.</p>
+        </div>
+        <button
+          className="secondary-button"
+          onClick={() => setActivePage("Attendance History")}
+        >
+          <History size={16} /> View History
+        </button>
+      </div>
+
+      <div className="attendance-form">
+        <h4>Record a Class Session</h4>
+
+        <div className="form-grid">
+          <div className="field-group">
+            <label>Course</label>
+            <select
+              value={attendanceCourse}
+              onChange={e => setAttendanceCourse(e.target.value)}
+            >
+              <option value="">Select course</option>
+              {courses.map(course => (
+                <option key={course.id} value={course.id}>
+                  {course.code} - {course.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field-group">
+            <label>Class Date</label>
+            <input
+              type="date"
+              value={attendanceDate}
+              onChange={e => setAttendanceDate(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="attendance-buttons">
+          <button
+            className="present-button"
+            onClick={() => markAttendance("Present")}
+          >
+            <CheckCircle2 size={17} /> Mark Present
+          </button>
+          <button
+            className="absent-button"
+            onClick={() => markAttendance("Absent")}
+          >
+            <X size={17} /> Mark Absent
+          </button>
+        </div>
+
+        <p className="module-hint">
+          If a record already exists for this course and date,
+          marking again will update it instead of creating a duplicate.
+        </p>
+      </div>
+
+      <h3 className="subsection-title">Course Attendance</h3>
+
+      <div className="attendance-course-grid">
+        {courses.map(course => {
+          const records = attendance.filter(
+            record => record.courseId === course.id
+          );
+
+          return (
+            <div className="attendance-course-card" key={course.id}>
+              <div className="attendance-course-heading">
+                <span
+                  className="course-dot"
+                  style={{ background: course.color }}
+                />
+                <strong>{course.name}</strong>
+              </div>
+
+              <h2>{attendancePercentage(course.id)}%</h2>
+
+              <p>
+                {records.filter(record => record.status === "Present").length}
+                {" "}present out of {records.length} recorded classes
+              </p>
+
+              <div className="attendance-progress">
+                <span
+                  style={{
+                    width: `${attendancePercentage(course.id)}%`,
+                    background: course.color
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+
+  const renderHistory = () => (
+    <section className="module-page">
+      <div className="module-toolbar">
+        <div>
+          <h3>Attendance History</h3>
+          <p>All recorded attendance sessions, organized by date.</p>
+        </div>
+        <button
+          className="secondary-button"
+          onClick={() => setActivePage("Attendance")}
+        >
+          <ClipboardCheck size={16} /> Back to Attendance
+        </button>
+      </div>
+
+      <div className="history-filter">
+        <label>Filter by course</label>
+        <select
+          value={historyCourseFilter}
+          onChange={e => setHistoryCourseFilter(e.target.value)}
+        >
+          <option value="all">All courses</option>
+          {courses.map(course => (
+            <option key={course.id} value={course.id}>
+              {course.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="history-table-wrap">
+        <table className="history-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Course</th>
+              <th>Course Code</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {filteredHistory.map(record => (
+              <tr key={record.id}>
+                <td>{record.date}</td>
+                <td>
+                  {getCourse(record.courseId)?.name ?? "Deleted course"}
+                </td>
+                <td>
+                  {getCourse(record.courseId)?.code ?? "—"}
+                </td>
+                <td>
+                  <span className={`status-pill ${record.status.toLowerCase()}`}>
+                    {record.status}
+                  </span>
+                </td>
+                <td>
+                  <button
+                    className="table-delete"
+                    onClick={() => deleteAttendance(record.id)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+
+            {filteredHistory.length === 0 && (
+              <tr>
+                <td colSpan={5} className="table-empty">
+                  No attendance records found.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="history-total">
+        Total recorded sessions: <strong>{filteredHistory.length}</strong>
+      </div>
+    </section>
+  );
+
+  if (!currentUser) {
+    return (
+      <div className="auth-page">
+        <div className="auth-brand">
+          <div className="brand-icon">S</div>
+          <span>
+            Semester<span className="brand-light">Sync</span>
+          </span>
+        </div>
+
+        <div className="auth-card">
+          <div className="auth-icon">
+            <User size={27} />
+          </div>
+
+          <h1>
+            {authPage === "signup"
+              ? "Create your account"
+              : "Welcome back"}
+          </h1>
+
+          <p className="auth-subtitle">
+            {authPage === "signup"
+              ? "Start organizing your semester today."
+              : "Login to access your academic dashboard."}
+          </p>
+
+          <div className="auth-tabs">
+            <button
+              className={`auth-tab ${authPage === "login" ? "active" : ""}`}
+              onClick={() => {
+                setAuthPage("login");
+                setAuthError("");
+              }}
+            >
+              Login
+            </button>
+
+            <button
+              className={`auth-tab ${authPage === "signup" ? "active" : ""}`}
+              onClick={() => {
+                setAuthPage("signup");
+                setAuthError("");
+              }}
+            >
+              Sign Up
+            </button>
+          </div>
+
+          <form onSubmit={handleAuth}>
+            {authPage === "signup" && (
+              <>
+                <label>Full Name</label>
+                <div className="auth-input-wrap">
+                  <User size={17} />
+                  <input
+                    value={authName}
+                    onChange={e => setAuthName(e.target.value)}
+                    placeholder="Enter your name"
+                    required
+                  />
+                </div>
+              </>
+            )}
+
+            <label>Email Address</label>
+            <div className="auth-input-wrap">
+              <Mail size={17} />
+              <input
+                type="email"
+                value={authEmail}
+                onChange={e => setAuthEmail(e.target.value)}
+                placeholder="name@example.com"
+                required
+              />
+            </div>
+
+            <label>Password</label>
+            <div className="auth-input-wrap">
+              <Lock size={17} />
+              <input
+                type="password"
+                value={authPassword}
+                onChange={e => setAuthPassword(e.target.value)}
+                placeholder="Enter password"
+                required
+                minLength={4}
+              />
+            </div>
+
+            {authPage === "signup" && (
+              <>
+                <label>Confirm Password</label>
+                <div className="auth-input-wrap">
+                  <Lock size={17} />
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm password"
+                    required
+                    minLength={4}
+                  />
+                </div>
+              </>
+            )}
+
+            {authError && (
+              <div className="auth-error">{authError}</div>
+            )}
+
+            <button className="auth-submit" type="submit">
+              {authPage === "signup"
+                ? "Create Account"
+                : "Login to Dashboard"}
+            </button>
+          </form>
+
+          <p className="auth-switch">
+            {authPage === "signup"
+              ? "Already have an account? "
+              : "Don't have an account? "}
+            <button
+              onClick={() => {
+                setAuthPage(authPage === "signup" ? "login" : "signup");
+                setAuthError("");
+              }}
+            >
+              {authPage === "signup" ? "Login" : "Sign Up"}
+            </button>
+          </p>
+        </div>
+
+        <p className="auth-footer">
+          © 2026 SemesterSync. Organize your semester smarter.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="app-layout">
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon">S</div>
-          <span>Semester<span className="brand-light">Sync</span></span>
+          <span>
+            Semester<span className="brand-light">Sync</span>
+          </span>
         </div>
 
         <p className="menu-label">MENU</p>
+
         <nav className="nav-menu">
-          <button className={`nav-link ${activePage === "Dashboard" ? "active" : ""}`}
-            onClick={() => setActivePage("Dashboard")}>
-            <LayoutDashboard size={19} /> Dashboard
-          </button>
-          <button className={`nav-link ${activePage === "Timetable" ? "active" : ""}`}
-            onClick={() => setActivePage("Timetable")}>
-            <CalendarDays size={19} /> Timetable
-          </button>
-          <button className={`nav-link ${activePage === "My Courses" ? "active" : ""}`}
-            onClick={() => setActivePage("My Courses")}>
-            <BookOpen size={19} /> My Courses
-          </button>
-          <button className={`nav-link ${activePage === "Assignments" ? "active" : ""}`}
-            onClick={() => setActivePage("Assignments")}>
-            <ClipboardList size={19} /> Assignments
-          </button>
-          <button className={`nav-link ${activePage === "Attendance" ? "active" : ""}`}
-            onClick={() => setActivePage("Attendance")}>
-            <ClipboardCheck size={19} /> Attendance
-          </button>
+          {[
+            ["Dashboard", LayoutDashboard],
+            ["Timetable", CalendarDays],
+            ["My Courses", BookOpen],
+            ["Assignments", ClipboardList],
+            ["Attendance", ClipboardCheck],
+            ["Attendance History", History]
+          ].map(([label, Icon]) => {
+            const NavIcon = Icon as typeof LayoutDashboard;
+
+            return (
+              <button
+                key={label as string}
+                className={`nav-link ${activePage === label ? "active" : ""}`}
+                onClick={() => setActivePage(label as string)}
+              >
+                <NavIcon size={19} /> {label as string}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="sidebar-bottom">
-          <button className={`nav-link ${activePage === "Settings" ? "active" : ""}`}
-            onClick={() => setActivePage("Settings")}>
+          <button
+            className={`nav-link ${activePage === "Settings" ? "active" : ""}`}
+            onClick={() => setActivePage("Settings")}
+          >
             <Settings size={19} /> Settings
           </button>
+
           <div className="profile">
             <div className="avatar">
-              {currentUser.name.split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase()}
+              {currentUser.name.slice(0, 2).toUpperCase()}
             </div>
+
             <div className="profile-info">
               <strong>{currentUser.name}</strong>
-              <small>Semester Student</small>
+              <small>{currentUser.email}</small>
             </div>
-            <button className="logout-button" onClick={handleLogout} title="Logout" aria-label="Logout">
+
+            <button
+              className="logout-button"
+              onClick={logout}
+              title="Logout"
+            >
               <LogOut size={17} />
             </button>
           </div>
@@ -567,77 +1313,318 @@ function App() {
         <header className="topbar">
           <div>
             <h2>{activePage}</h2>
-            <p>{activePage === "Dashboard"
-              ? `Welcome back, ${currentUser.name}! Here's your semester overview.`
-              : `Manage your ${activePage.toLowerCase()} here.`}</p>
+            <p>
+              {activePage === "Dashboard"
+                ? "Welcome back! Here's your semester overview."
+                : `Manage your ${activePage.toLowerCase()} here.`}
+            </p>
           </div>
+
           <div className="top-actions">
-            <button className="icon-button" aria-label="Search"><Search size={19} /></button>
-            <button className="icon-button" aria-label="Notifications"><Bell size={19} /></button>
+            <button
+              className="icon-button"
+              aria-label="Search"
+              onClick={() => setActivePage("My Courses")}
+            >
+              <Search size={19} />
+            </button>
             <div className="avatar">
-              {currentUser.name.split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase()}
+              {currentUser.name.slice(0, 2).toUpperCase()}
             </div>
           </div>
         </header>
 
         {activePage === "Dashboard" && renderDashboard()}
         {activePage === "My Courses" && renderCourses()}
+        {activePage === "Timetable" && renderTimetable()}
+        {activePage === "Assignments" && renderAssignments()}
+        {activePage === "Attendance" && renderAttendance()}
+        {activePage === "Attendance History" && renderHistory()}
 
-        {activePage !== "Dashboard" && activePage !== "My Courses" && (
+        {activePage === "Settings" && (
           <div className="empty-state">
-            <CalendarDays size={38} />
-            <h3>{activePage} coming next!</h3>
-            <p>We will implement this module in the next development step.</p>
-            <button className="primary-button" onClick={() => setActivePage("Dashboard")}>
-              <ArrowLeft size={16} /> Back to Dashboard
-            </button>
+            <Settings size={38} />
+            <h3>Settings</h3>
+            <p>Account settings will be added in a later step.</p>
           </div>
         )}
 
-        <footer>© 2026 SemesterSync. Organize your semester smarter.</footer>
+        <footer>
+          © 2026 SemesterSync. Organize your semester smarter.
+        </footer>
       </main>
 
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="course-modal" onClick={e => e.stopPropagation()}>
+      {showCourseModal && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCourseModal(false)}
+        >
+          <div
+            className="course-modal"
+            onClick={e => e.stopPropagation()}
+          >
             <div className="modal-heading">
               <div>
-                <h3>{editingId !== null ? "Edit Course" : "Add New Course"}</h3>
-                <p>Enter your course information below.</p>
+                <h3>
+                  {editingCourseId ? "Edit Course" : "Add New Course"}
+                </h3>
+                <p>Enter your course information.</p>
               </div>
-              <button className="close-button" onClick={() => setShowModal(false)}>
+              <button
+                className="close-button"
+                onClick={() => setShowCourseModal(false)}
+              >
                 <X size={21} />
               </button>
             </div>
 
             <form onSubmit={saveCourse}>
-              <label htmlFor="courseName">Course Name</label>
-              <input id="courseName" type="text" placeholder="e.g. Web Programming"
-                value={courseName} onChange={e => setCourseName(e.target.value)} required />
+              <label>Course Name</label>
+              <input
+                value={courseName}
+                onChange={e => setCourseName(e.target.value)}
+                placeholder="e.g. Web Programming"
+                required
+              />
 
-              <label htmlFor="courseCode">Course Code</label>
-              <input id="courseCode" type="text" placeholder="e.g. CS301"
-                value={courseCode} onChange={e => setCourseCode(e.target.value)} required />
+              <label>Course Code</label>
+              <input
+                value={courseCode}
+                onChange={e => setCourseCode(e.target.value)}
+                placeholder="e.g. CS301"
+                required
+              />
 
-              <label htmlFor="courseColor">Course Color</label>
+              <label>Course Color</label>
               <div className="color-picker-row">
-                {["#8974e8", "#55a8e9", "#efa45f", "#48b99b", "#e8759b"].map(color => (
-                  <button type="button" key={color}
+                {[
+                  "#8974e8", "#55a8e9", "#efa45f",
+                  "#48b99b", "#e8759b"
+                ].map(color => (
+                  <button
+                    type="button"
+                    key={color}
                     className={`color-option ${courseColor === color ? "selected" : ""}`}
                     style={{ backgroundColor: color }}
                     onClick={() => setCourseColor(color)}
-                    aria-label={`Select color ${color}`} />
+                  />
                 ))}
-                <input type="color" value={courseColor}
+                <input
+                  type="color"
+                  value={courseColor}
                   onChange={e => setCourseColor(e.target.value)}
-                  aria-label="Custom course color" />
+                />
               </div>
 
               <div className="modal-actions">
-                <button type="button" className="cancel-button"
-                  onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="primary-button">
-                  <Save size={16} /> {editingId !== null ? "Save Changes" : "Add Course"}
+                <button
+                  type="button"
+                  className="cancel-button"
+                  onClick={() => setShowCourseModal(false)}
+                >
+                  Cancel
+                </button>
+                <button className="primary-button" type="submit">
+                  <Save size={16} /> Save Course
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showSlotForm && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSlotForm(false)}
+        >
+          <div
+            className="course-modal"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <div>
+                <h3>
+                  {editingSlotId ? "Edit Class" : "Add Class Slot"}
+                </h3>
+                <p>Set the course, day and class timing.</p>
+              </div>
+              <button
+                className="close-button"
+                onClick={() => setShowSlotForm(false)}
+              >
+                <X size={21} />
+              </button>
+            </div>
+
+            <form onSubmit={saveSlot}>
+              <label>Course</label>
+              <select
+                value={slotCourse}
+                onChange={e => setSlotCourse(e.target.value)}
+                required
+              >
+                <option value="">Select course</option>
+                {courses.map(course => (
+                  <option key={course.id} value={course.id}>
+                    {course.code} - {course.name}
+                  </option>
+                ))}
+              </select>
+
+              <label>Weekday</label>
+              <select
+                value={slotDay}
+                onChange={e => setSlotDay(e.target.value)}
+              >
+                {weekdays.map(day => (
+                  <option key={day}>{day}</option>
+                ))}
+              </select>
+
+              <div className="form-grid">
+                <div>
+                  <label>Start Time</label>
+                  <input
+                    type="time"
+                    value={slotStart}
+                    onChange={e => setSlotStart(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label>End Time</label>
+                  <input
+                    type="time"
+                    value={slotEnd}
+                    onChange={e => setSlotEnd(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <label>Room</label>
+              <input
+                value={slotRoom}
+                onChange={e => setSlotRoom(e.target.value)}
+                placeholder="e.g. Lab 3"
+              />
+
+              {slotError && (
+                <div className="auth-error">
+                  <AlertTriangle size={15} /> {slotError}
+                </div>
+              )}
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="cancel-button"
+                  onClick={() => setShowSlotForm(false)}
+                >
+                  Cancel
+                </button>
+                <button className="primary-button" type="submit">
+                  <Save size={16} /> Save Class
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showAssignmentForm && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowAssignmentForm(false)}
+        >
+          <div
+            className="course-modal"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="modal-heading">
+              <div>
+                <h3>
+                  {editingAssignmentId
+                    ? "Edit Deadline"
+                    : "Add Assignment or Exam"}
+                </h3>
+                <p>Enter the deadline details.</p>
+              </div>
+              <button
+                className="close-button"
+                onClick={() => setShowAssignmentForm(false)}
+              >
+                <X size={21} />
+              </button>
+            </div>
+
+            <form onSubmit={saveAssignment}>
+              <label>Title</label>
+              <input
+                value={assignmentTitle}
+                onChange={e => setAssignmentTitle(e.target.value)}
+                placeholder="e.g. Database Assignment"
+                required
+              />
+
+              <label>Course</label>
+              <select
+                value={assignmentCourse}
+                onChange={e => setAssignmentCourse(e.target.value)}
+                required
+              >
+                <option value="">Select course</option>
+                {courses.map(course => (
+                  <option key={course.id} value={course.id}>
+                    {course.code} - {course.name}
+                  </option>
+                ))}
+              </select>
+
+              <label>Type</label>
+              <select
+                value={assignmentType}
+                onChange={e => setAssignmentType(e.target.value)}
+              >
+                <option>Assignment</option>
+                <option>Project</option>
+                <option>Quiz</option>
+                <option>Exam</option>
+                <option>Presentation</option>
+              </select>
+
+              <div className="form-grid">
+                <div>
+                  <label>Due Date</label>
+                  <input
+                    type="date"
+                    value={assignmentDate}
+                    onChange={e => setAssignmentDate(e.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label>Due Time</label>
+                  <input
+                    type="time"
+                    value={assignmentTime}
+                    onChange={e => setAssignmentTime(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="cancel-button"
+                  onClick={() => setShowAssignmentForm(false)}
+                >
+                  Cancel
+                </button>
+                <button className="primary-button" type="submit">
+                  <Save size={16} /> Save Deadline
                 </button>
               </div>
             </form>
