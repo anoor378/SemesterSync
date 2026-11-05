@@ -1,23 +1,10 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
-  LayoutDashboard,
-  CalendarDays,
-  BookOpen,
-  ClipboardList,
-  ClipboardCheck,
-  Settings,
-  Search,
-  Bell,
-  Plus,
-  Clock,
-  MapPin,
-  CheckCircle2,
-  Pencil,
-  Trash2,
-  X,
-  Save,
-  ArrowLeft
+  LayoutDashboard, CalendarDays, BookOpen, ClipboardList,
+  ClipboardCheck, Settings, Search, Bell, Plus, Clock, MapPin,
+  CheckCircle2, Pencil, Trash2, X, Save, ArrowLeft, LogOut,
+  Lock, Mail, User, GraduationCap
 } from "lucide-react";
 import "./App.css";
 
@@ -26,6 +13,12 @@ type Course = {
   code: string;
   name: string;
   color: string;
+};
+
+type Account = {
+  name: string;
+  email: string;
+  password: string;
 };
 
 const initialCourses: Course[] = [
@@ -47,6 +40,29 @@ const deadlines = [
 ];
 
 function App() {
+  const [accounts, setAccounts] = useState<Account[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("semestersync_accounts") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  const [currentUser, setCurrentUser] = useState<Account | null>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("semestersync_user") || "null");
+    } catch {
+      return null;
+    }
+  });
+
+  const [authPage, setAuthPage] = useState<"login" | "signup">("login");
+  const [authName, setAuthName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+
   const [courses, setCourses] = useState<Course[]>(() => {
     try {
       const saved = localStorage.getItem("semestersync_courses");
@@ -65,8 +81,93 @@ function App() {
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
+    localStorage.setItem("semestersync_accounts", JSON.stringify(accounts));
+  }, [accounts]);
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem("semestersync_user", JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem("semestersync_user");
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
     localStorage.setItem("semestersync_courses", JSON.stringify(courses));
   }, [courses]);
+
+  const handleSignup = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setAuthError("");
+
+    if (!authName.trim() || !authEmail.trim() || !authPassword) {
+      setAuthError("Please fill in all fields.");
+      return;
+    }
+
+    if (authPassword.length < 6) {
+      setAuthError("Password must contain at least 6 characters.");
+      return;
+    }
+
+    if (authPassword !== confirmPassword) {
+      setAuthError("Passwords do not match.");
+      return;
+    }
+
+    const exists = accounts.some(
+      account => account.email.toLowerCase() === authEmail.trim().toLowerCase()
+    );
+
+    if (exists) {
+      setAuthError("An account with this email already exists. Please login.");
+      return;
+    }
+
+    const newAccount: Account = {
+      name: authName.trim(),
+      email: authEmail.trim().toLowerCase(),
+      password: authPassword
+    };
+
+    setAccounts(previous => [...previous, newAccount]);
+    setCurrentUser(newAccount);
+    setActivePage("Dashboard");
+    setAuthName("");
+    setAuthEmail("");
+    setAuthPassword("");
+    setConfirmPassword("");
+  };
+
+  const handleLogin = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setAuthError("");
+
+    const account = accounts.find(
+      item =>
+        item.email === authEmail.trim().toLowerCase() &&
+        item.password === authPassword
+    );
+
+    if (!account) {
+      setAuthError("Invalid email or password. Please try again.");
+      return;
+    }
+
+    setCurrentUser(account);
+    setActivePage("Dashboard");
+    setAuthEmail("");
+    setAuthPassword("");
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setActivePage("Dashboard");
+    setAuthPage("login");
+    setAuthError("");
+    setAuthPassword("");
+    setConfirmPassword("");
+  };
 
   const openAddModal = () => {
     setEditingId(null);
@@ -84,7 +185,7 @@ function App() {
     setShowModal(true);
   };
 
-  const saveCourse = (e: React.FormEvent<HTMLFormElement>) => {
+  const saveCourse = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (!courseName.trim() || !courseCode.trim()) {
@@ -123,7 +224,6 @@ function App() {
         code: courseCode.trim().toUpperCase(),
         color: courseColor
       };
-
       setCourses(previous => [...previous, newCourse]);
     }
 
@@ -131,20 +231,146 @@ function App() {
   };
 
   const deleteCourse = (id: number) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this course?"
-    );
-
-    if (confirmed) {
+    if (window.confirm("Are you sure you want to delete this course?")) {
       setCourses(previous => previous.filter(course => course.id !== id));
     }
   };
 
   const filteredCourses = courses.filter(course =>
-    `${course.name} ${course.code}`
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase())
+    `${course.name} ${course.code}`.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  if (!currentUser) {
+    return (
+      <div className="auth-page">
+        <div className="auth-brand">
+          <div className="brand-icon">S</div>
+          <span>Semester<span className="brand-light">Sync</span></span>
+        </div>
+
+        <div className="auth-card">
+          <div className="auth-icon">
+            <GraduationCap size={30} />
+          </div>
+
+          <h1>{authPage === "login" ? "Welcome Back!" : "Create Your Account"}</h1>
+          <p className="auth-subtitle">
+            {authPage === "login"
+              ? "Login to manage your semester."
+              : "Start organizing your academic life."}
+          </p>
+
+          <div className="auth-tabs">
+            <button
+              className={authPage === "login" ? "auth-tab active" : "auth-tab"}
+              onClick={() => {
+                setAuthPage("login");
+                setAuthError("");
+              }}
+              type="button"
+            >
+              Login
+            </button>
+            <button
+              className={authPage === "signup" ? "auth-tab active" : "auth-tab"}
+              onClick={() => {
+                setAuthPage("signup");
+                setAuthError("");
+              }}
+              type="button"
+            >
+              Sign Up
+            </button>
+          </div>
+
+          <form onSubmit={authPage === "login" ? handleLogin : handleSignup}>
+            {authPage === "signup" && (
+              <>
+                <label htmlFor="authName">Full Name</label>
+                <div className="auth-input-wrap">
+                  <User size={18} />
+                  <input
+                    id="authName"
+                    type="text"
+                    placeholder="Enter your full name"
+                    value={authName}
+                    onChange={e => setAuthName(e.target.value)}
+                    required
+                  />
+                </div>
+              </>
+            )}
+
+            <label htmlFor="authEmail">Email Address</label>
+            <div className="auth-input-wrap">
+              <Mail size={18} />
+              <input
+                id="authEmail"
+                type="email"
+                placeholder="student@example.com"
+                value={authEmail}
+                onChange={e => setAuthEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            <label htmlFor="authPassword">Password</label>
+            <div className="auth-input-wrap">
+              <Lock size={18} />
+              <input
+                id="authPassword"
+                type="password"
+                placeholder="Enter your password"
+                value={authPassword}
+                onChange={e => setAuthPassword(e.target.value)}
+                required
+              />
+            </div>
+
+            {authPage === "signup" && (
+              <>
+                <label htmlFor="confirmPassword">Confirm Password</label>
+                <div className="auth-input-wrap">
+                  <Lock size={18} />
+                  <input
+                    id="confirmPassword"
+                    type="password"
+                    placeholder="Confirm your password"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    required
+                  />
+                </div>
+              </>
+            )}
+
+            {authError && <div className="auth-error">{authError}</div>}
+
+            <button className="auth-submit" type="submit">
+              {authPage === "login" ? "Login to Dashboard" : "Create Account"}
+            </button>
+          </form>
+
+          <p className="auth-switch">
+            {authPage === "login"
+              ? "Don't have an account?"
+              : "Already have an account?"}
+            <button
+              type="button"
+              onClick={() => {
+                setAuthPage(authPage === "login" ? "signup" : "login");
+                setAuthError("");
+              }}
+            >
+              {authPage === "login" ? " Sign Up" : " Login"}
+            </button>
+          </p>
+        </div>
+
+        <p className="auth-footer">© 2026 SemesterSync. Organize your semester smarter.</p>
+      </div>
+    );
+  }
 
   const renderDashboard = () => (
     <>
@@ -186,13 +412,9 @@ function App() {
       <section className="content-grid">
         <div className="content-card">
           <div className="section-heading">
-            <div>
-              <h3>Today's Schedule</h3>
-              <p>Your classes for today</p>
-            </div>
+            <div><h3>Today's Schedule</h3><p>Your classes for today</p></div>
             <a href="#" onClick={e => e.preventDefault()}>View Timetable</a>
           </div>
-
           {classes.map((item, index) => (
             <div className="class-item" key={index}>
               <div className={`class-indicator ${item.color}`} />
@@ -208,13 +430,9 @@ function App() {
 
         <div className="content-card">
           <div className="section-heading">
-            <div>
-              <h3>Upcoming Deadlines</h3>
-              <p>Don't miss your submissions</p>
-            </div>
+            <div><h3>Upcoming Deadlines</h3><p>Don't miss your submissions</p></div>
             <a href="#" onClick={e => e.preventDefault()}>View All</a>
           </div>
-
           {deadlines.map((item, index) => (
             <div className="deadline-item" key={index}>
               <div className="date-box">
@@ -236,10 +454,7 @@ function App() {
   const renderCourses = () => (
     <section className="courses-page">
       <div className="courses-toolbar">
-        <div>
-          <h3>My Courses</h3>
-          <p>Manage all your semester courses in one place.</p>
-        </div>
+        <div><h3>My Courses</h3><p>Manage all your semester courses in one place.</p></div>
         <button className="primary-button" onClick={openAddModal}>
           <Plus size={18} /> Add Course
         </button>
@@ -256,10 +471,7 @@ function App() {
       </div>
 
       <div className="course-summary">
-        <div>
-          <span>Total Registered Courses</span>
-          <h2>{courses.length}</h2>
-        </div>
+        <div><span>Total Registered Courses</span><h2>{courses.length}</h2></div>
         <BookOpen size={27} />
       </div>
 
@@ -273,28 +485,20 @@ function App() {
         <div className="courses-grid">
           {filteredCourses.map(course => (
             <div className="course-card" key={course.id}>
-              <div
-                className="course-color-bar"
-                style={{ backgroundColor: course.color }}
-              />
+              <div className="course-color-bar" style={{ backgroundColor: course.color }} />
               <div className="course-card-content">
                 <div className="course-card-top">
-                  <div
-                    className="course-icon"
-                    style={{ backgroundColor: `${course.color}20`, color: course.color }}
-                  >
+                  <div className="course-icon" style={{
+                    backgroundColor: `${course.color}20`, color: course.color
+                  }}>
                     <BookOpen size={23} />
                   </div>
                   <span className="course-code">{course.code}</span>
                 </div>
-
                 <h3>{course.name}</h3>
                 <p>Registered course</p>
-
                 <div className="course-actions">
-                  <button onClick={() => openEditModal(course)}>
-                    <Pencil size={15} /> Edit
-                  </button>
+                  <button onClick={() => openEditModal(course)}><Pencil size={15} /> Edit</button>
                   <button className="delete-action" onClick={() => deleteCourse(course.id)}>
                     <Trash2 size={15} /> Delete
                   </button>
@@ -316,54 +520,45 @@ function App() {
         </div>
 
         <p className="menu-label">MENU</p>
-
         <nav className="nav-menu">
-          <button
-            className={`nav-link ${activePage === "Dashboard" ? "active" : ""}`}
-            onClick={() => setActivePage("Dashboard")}
-          >
+          <button className={`nav-link ${activePage === "Dashboard" ? "active" : ""}`}
+            onClick={() => setActivePage("Dashboard")}>
             <LayoutDashboard size={19} /> Dashboard
           </button>
-
-          <button
-            className={`nav-link ${activePage === "Timetable" ? "active" : ""}`}
-            onClick={() => setActivePage("Timetable")}
-          >
+          <button className={`nav-link ${activePage === "Timetable" ? "active" : ""}`}
+            onClick={() => setActivePage("Timetable")}>
             <CalendarDays size={19} /> Timetable
           </button>
-
-          <button
-            className={`nav-link ${activePage === "My Courses" ? "active" : ""}`}
-            onClick={() => setActivePage("My Courses")}
-          >
+          <button className={`nav-link ${activePage === "My Courses" ? "active" : ""}`}
+            onClick={() => setActivePage("My Courses")}>
             <BookOpen size={19} /> My Courses
           </button>
-
-          <button
-            className={`nav-link ${activePage === "Assignments" ? "active" : ""}`}
-            onClick={() => setActivePage("Assignments")}
-          >
+          <button className={`nav-link ${activePage === "Assignments" ? "active" : ""}`}
+            onClick={() => setActivePage("Assignments")}>
             <ClipboardList size={19} /> Assignments
           </button>
-
-          <button
-            className={`nav-link ${activePage === "Attendance" ? "active" : ""}`}
-            onClick={() => setActivePage("Attendance")}
-          >
+          <button className={`nav-link ${activePage === "Attendance" ? "active" : ""}`}
+            onClick={() => setActivePage("Attendance")}>
             <ClipboardCheck size={19} /> Attendance
           </button>
         </nav>
 
         <div className="sidebar-bottom">
-          <button className="nav-link" onClick={() => setActivePage("Settings")}>
+          <button className={`nav-link ${activePage === "Settings" ? "active" : ""}`}
+            onClick={() => setActivePage("Settings")}>
             <Settings size={19} /> Settings
           </button>
           <div className="profile">
-            <div className="avatar">AN</div>
-            <div>
-              <strong>Student Name</strong>
+            <div className="avatar">
+              {currentUser.name.split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase()}
+            </div>
+            <div className="profile-info">
+              <strong>{currentUser.name}</strong>
               <small>Semester Student</small>
             </div>
+            <button className="logout-button" onClick={handleLogout} title="Logout" aria-label="Logout">
+              <LogOut size={17} />
+            </button>
           </div>
         </div>
       </aside>
@@ -372,20 +567,16 @@ function App() {
         <header className="topbar">
           <div>
             <h2>{activePage}</h2>
-            <p>
-              {activePage === "Dashboard"
-                ? "Welcome back! Here's your semester overview."
-                : `Manage your ${activePage.toLowerCase()} here.`}
-            </p>
+            <p>{activePage === "Dashboard"
+              ? `Welcome back, ${currentUser.name}! Here's your semester overview.`
+              : `Manage your ${activePage.toLowerCase()} here.`}</p>
           </div>
           <div className="top-actions">
-            <button className="icon-button" aria-label="Search">
-              <Search size={19} />
-            </button>
-            <button className="icon-button" aria-label="Notifications">
-              <Bell size={19} />
-            </button>
-            <div className="avatar">AN</div>
+            <button className="icon-button" aria-label="Search"><Search size={19} /></button>
+            <button className="icon-button" aria-label="Notifications"><Bell size={19} /></button>
+            <div className="avatar">
+              {currentUser.name.split(" ").map(part => part[0]).join("").slice(0, 2).toUpperCase()}
+            </div>
           </div>
         </header>
 
@@ -421,56 +612,32 @@ function App() {
 
             <form onSubmit={saveCourse}>
               <label htmlFor="courseName">Course Name</label>
-              <input
-                id="courseName"
-                type="text"
-                placeholder="e.g. Web Programming"
-                value={courseName}
-                onChange={e => setCourseName(e.target.value)}
-                required
-              />
+              <input id="courseName" type="text" placeholder="e.g. Web Programming"
+                value={courseName} onChange={e => setCourseName(e.target.value)} required />
 
               <label htmlFor="courseCode">Course Code</label>
-              <input
-                id="courseCode"
-                type="text"
-                placeholder="e.g. CS301"
-                value={courseCode}
-                onChange={e => setCourseCode(e.target.value)}
-                required
-              />
+              <input id="courseCode" type="text" placeholder="e.g. CS301"
+                value={courseCode} onChange={e => setCourseCode(e.target.value)} required />
 
               <label htmlFor="courseColor">Course Color</label>
               <div className="color-picker-row">
                 {["#8974e8", "#55a8e9", "#efa45f", "#48b99b", "#e8759b"].map(color => (
-                  <button
-                    type="button"
-                    key={color}
+                  <button type="button" key={color}
                     className={`color-option ${courseColor === color ? "selected" : ""}`}
                     style={{ backgroundColor: color }}
                     onClick={() => setCourseColor(color)}
-                    aria-label={`Select color ${color}`}
-                  />
+                    aria-label={`Select color ${color}`} />
                 ))}
-                <input
-                  type="color"
-                  value={courseColor}
+                <input type="color" value={courseColor}
                   onChange={e => setCourseColor(e.target.value)}
-                  aria-label="Custom course color"
-                />
+                  aria-label="Custom course color" />
               </div>
 
               <div className="modal-actions">
-                <button
-                  type="button"
-                  className="cancel-button"
-                  onClick={() => setShowModal(false)}
-                >
-                  Cancel
-                </button>
+                <button type="button" className="cancel-button"
+                  onClick={() => setShowModal(false)}>Cancel</button>
                 <button type="submit" className="primary-button">
-                  <Save size={16} />
-                  {editingId !== null ? "Save Changes" : "Add Course"}
+                  <Save size={16} /> {editingId !== null ? "Save Changes" : "Add Course"}
                 </button>
               </div>
             </form>
