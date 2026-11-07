@@ -1,3 +1,4 @@
+
 import { useEffect, useState, type FormEvent, type ChangeEvent } from "react";
 import {
   LayoutDashboard, CalendarDays, BookOpen, ClipboardList,
@@ -49,18 +50,21 @@ type Assignment = {
   completed: boolean;
 };
 
+type MakeupClass = {
+  id: number;
+  courseId: number;
+  date: string;
+  start: string;
+  end: string;
+  room: string;
+  note: string;
+};
+
 type AttendanceRecord = {
   id: number;
   courseId: number;
   date: string;
   status: "Present" | "Absent";
-};
-
-type CancelledClass = {
-  id: number;
-  slotId: number;
-  date: string;
-  reason: string;
 };
 
 const initialCourses: Course[] = [
@@ -115,10 +119,20 @@ function App() {
     readStorage("semestersync_attendance", [])
   );
 
-  // Cancelled classes are stored separately from weekly timetable slots.
-  const [cancelledClasses, setCancelledClasses] = useState<CancelledClass[]>(() =>
-    readStorage("semestersync_cancelled_classes", [])
+  const [makeupClasses, setMakeupClasses] = useState<MakeupClass[]>(() =>
+    readStorage("semestersync_makeup_classes", [])
   );
+  const [makeupCourse, setMakeupCourse] = useState("");
+  const [makeupDate, setMakeupDate] = useState("");
+  const [makeupStart, setMakeupStart] = useState("09:00");
+  const [makeupEnd, setMakeupEnd] = useState("10:00");
+  const [makeupRoom, setMakeupRoom] = useState("");
+  const [makeupNote, setMakeupNote] = useState("");
+  const [makeupError, setMakeupError] = useState("");
+  const [assignmentFilter, setAssignmentFilter] = useState<"all" | "pending" | "completed" | "overdue">("all");
+  const [settingsName, setSettingsName] = useState("");
+  const [settingsEmail, setSettingsEmail] = useState("");
+  const [settingsMessage, setSettingsMessage] = useState("");
 
   const [activePage, setActivePage] = useState("Dashboard");
   const [searchTerm, setSearchTerm] = useState("");
@@ -180,11 +194,15 @@ function App() {
   }, [attendance]);
 
   useEffect(() => {
-    localStorage.setItem(
-      "semestersync_cancelled_classes",
-      JSON.stringify(cancelledClasses)
-    );
-  }, [cancelledClasses]);
+    localStorage.setItem("semestersync_makeup_classes", JSON.stringify(makeupClasses));
+  }, [makeupClasses]);
+
+  useEffect(() => {
+    if (currentUser) {
+      setSettingsName(currentUser.name);
+      setSettingsEmail(currentUser.email);
+    }
+  }, [currentUser]);
 
   const getCourse = (id: number) =>
     courses.find(course => course.id === id);
@@ -207,16 +225,37 @@ function App() {
     String(now.getMinutes()).padStart(2, "0")
   ].join(":");
 
-  // Hide today's cancelled classes from today's dashboard schedule.
   const todaySlots = slots
-    .filter(slot =>
-      slot.day === todayName &&
-      !cancelledClasses.some(cancelled =>
-        cancelled.slotId === slot.id &&
-        cancelled.date === todayDateString
-      )
-    )
+    .filter(slot => slot.day === todayName)
     .sort((a, b) => a.start.localeCompare(b.start));
+
+  // Today's one-time makeup classes
+  const todayMakeupClasses = makeupClasses
+    .filter(item => item.date === todayDateString)
+    .sort((a, b) => a.start.localeCompare(b.start));
+
+  // Total regular and makeup classes for today
+  const todayClassesCount = todaySlots.length + todayMakeupClasses.length;
+
+  // Combine both class types and sort them by start time
+  const todaySchedule = [
+    ...todaySlots.map(slot => ({
+      id: slot.id,
+      courseId: slot.courseId,
+      start: slot.start,
+      end: slot.end,
+      room: slot.room,
+      type: "Class"
+    })),
+    ...todayMakeupClasses.map(item => ({
+      id: item.id,
+      courseId: item.courseId,
+      start: item.start,
+      end: item.end,
+      room: item.room,
+      type: "Makeup"
+    }))
+  ].sort((a, b) => a.start.localeCompare(b.start));
 
   const pendingAssignments = assignments.filter(
     item => !item.completed
@@ -252,6 +291,15 @@ function App() {
         `${b.dueDate} ${b.dueTime}`
       )
     );
+
+  const filteredAssignments = [...assignments]
+    .filter(item => {
+      if (assignmentFilter === "completed") return item.completed;
+      if (assignmentFilter === "pending") return !item.completed && !isOverdue(item);
+      if (assignmentFilter === "overdue") return !item.completed && isOverdue(item);
+      return true;
+    })
+    .sort((a, b) => `${a.dueDate} ${a.dueTime}`.localeCompare(`${b.dueDate} ${b.dueTime}`));
 
   const attendancePercentage = (courseId?: number) => {
     const records = attendance.filter(record =>
@@ -368,18 +416,11 @@ function App() {
       "Delete this course and its related timetable, assignments and attendance?"
     )) return;
 
-    const courseSlotIds = slots
-      .filter(slot => slot.courseId === id)
-      .map(slot => slot.id);
-
     setCourses(previous => previous.filter(course => course.id !== id));
     setSlots(previous => previous.filter(slot => slot.courseId !== id));
     setAssignments(previous => previous.filter(item => item.courseId !== id));
     setAttendance(previous => previous.filter(record => record.courseId !== id));
-
-    setCancelledClasses(previous =>
-      previous.filter(item => !courseSlotIds.includes(item.slotId))
-    );
+    setMakeupClasses(previous => previous.filter(item => item.courseId !== id));
   };
 
   const openSlotForm = (slot?: Slot) => {
@@ -446,93 +487,90 @@ function App() {
   const deleteSlot = (id: number) => {
     if (window.confirm("Delete this class slot?")) {
       setSlots(previous => previous.filter(slot => slot.id !== id));
-
-      setCancelledClasses(previous =>
-        previous.filter(item => item.slotId !== id)
-      );
     }
   };
 
-  // Cancel one occurrence of a weekly class without deleting its timetable slot.
-  const cancelClass = (slot: Slot) => {
-    const selectedDate = window.prompt(
-      `Enter the date for this cancelled ${slot.day} class (YYYY-MM-DD):`,
-      todayDateString
-    );
-
-    if (selectedDate === null) return;
-
-    const date = selectedDate.trim();
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      alert("Please enter the date in YYYY-MM-DD format.");
+  const addMakeupClass = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setMakeupError("");
+    if (!makeupCourse) {
+      setMakeupError("Please select a course.");
       return;
     }
-
-    const parsedDate = new Date(`${date}T00:00:00`);
-
-    if (
-      Number.isNaN(parsedDate.getTime()) ||
-      parsedDate.getFullYear() !== Number(date.slice(0, 4)) ||
-      parsedDate.getMonth() + 1 !== Number(date.slice(5, 7)) ||
-      parsedDate.getDate() !== Number(date.slice(8, 10))
-    ) {
-      alert("Please enter a valid calendar date.");
+    if (!makeupDate) {
+      setMakeupError("Please select the makeup class date.");
       return;
     }
-
-    const selectedDay = parsedDate.toLocaleDateString("en-US", {
-      weekday: "long"
-    });
-
-    if (selectedDay !== slot.day) {
-      alert(`This class is scheduled on ${slot.day}. Please select a ${slot.day}.`);
+    if (makeupStart >= makeupEnd) {
+      setMakeupError("End time must be later than start time.");
       return;
     }
-
-    if (date < todayDateString) {
-      alert("You cannot cancel a class for a past date.");
+    const dayName = new Date(`${makeupDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+    const recurringClash = slots.find(slot => slot.day === dayName && makeupStart < slot.end && makeupEnd > slot.start);
+    const oneTimeClash = makeupClasses.find(item => item.date === makeupDate && makeupStart < item.end && makeupEnd > item.start);
+    if (recurringClash || oneTimeClash) {
+      setMakeupError("This time overlaps with another class on that date.");
       return;
     }
-
-    const alreadyCancelled = cancelledClasses.some(item =>
-      item.slotId === slot.id && item.date === date
-    );
-
-    if (alreadyCancelled) {
-      alert("This class has already been cancelled for the selected date.");
-      return;
-    }
-
-    const reason = window.prompt("Enter the reason for cancelling this class:");
-
-    if (reason === null) return;
-
-    if (!reason.trim()) {
-      alert("Please enter a cancellation reason.");
-      return;
-    }
-
-    setCancelledClasses(previous => [
-      ...previous,
-      {
-        id: Date.now(),
-        slotId: slot.id,
-        date,
-        reason: reason.trim()
-      }
-    ]);
-
-    alert("Class cancelled successfully.");
+    setMakeupClasses(previous => [...previous, {
+      id: Date.now(), courseId: Number(makeupCourse), date: makeupDate,
+      start: makeupStart, end: makeupEnd, room: makeupRoom.trim(), note: makeupNote.trim()
+    }]);
+    setMakeupCourse(""); setMakeupDate(""); setMakeupStart("09:00");
+    setMakeupEnd("10:00"); setMakeupRoom(""); setMakeupNote("");
   };
 
-  // Restore a previously cancelled class occurrence.
-  const restoreClass = (id: number) => {
-    if (!window.confirm("Restore this cancelled class?")) return;
+  const deleteMakeupClass = (id: number) => {
+    if (window.confirm("Delete this makeup class?")) {
+      setMakeupClasses(previous => previous.filter(item => item.id !== id));
+    }
+  };
 
-    setCancelledClasses(previous =>
-      previous.filter(item => item.id !== id)
-    );
+  const exportTimetableCsv = () => {
+    const rows = [
+      ["Course Code", "Course Name", "Day", "Start", "End", "Room"],
+      ...slots.map(slot => {
+        const course = getCourse(slot.courseId);
+        return [course?.code ?? "", course?.name ?? "", slot.day, slot.start, slot.end, slot.room];
+      })
+    ];
+    const csv = rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = "semestersync-timetable.csv"; link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const saveSettings = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    const cleanEmail = settingsEmail.trim().toLowerCase();
+    if (accounts.some(account => account.email.toLowerCase() === cleanEmail && account.email.toLowerCase() !== currentUser.email.toLowerCase())) {
+      setSettingsMessage("This email is already used by another account.");
+      return;
+    }
+    const updated: Account = { ...currentUser, name: settingsName.trim(), email: cleanEmail };
+    setAccounts(previous => previous.map(account => account.email.toLowerCase() === currentUser.email.toLowerCase() ? updated : account));
+    setCurrentUser(updated);
+    setSettingsMessage("Profile updated successfully.");
+  };
+
+  const exportAllData = () => {
+    const data = {
+      exportedAt: new Date().toISOString(),
+      profile: currentUser ? { name: currentUser.name, email: currentUser.email } : null,
+      courses, slots, makeupClasses, assignments, attendance
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url; link.download = "semestersync-backup.json"; link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const resetAcademicData = () => {
+    if (!window.confirm("This will delete all courses, timetable classes, makeup classes, assignments and attendance records. Continue?")) return;
+    setCourses([]); setSlots([]); setMakeupClasses([]); setAssignments([]); setAttendance([]);
+    setSettingsMessage("Academic data has been reset.");
   };
 
   const downloadCsvTemplate = () => {
@@ -810,8 +848,8 @@ function App() {
           <div className="stat-top">
             <span>Today's Classes</span><CalendarDays />
           </div>
-          <h2>{String(todaySlots.length).padStart(2, "0")}</h2>
-          <small>Scheduled for today</small>
+          <h2>{String(todayClassesCount).padStart(2, "0")}</h2>
+          <small>Regular and makeup classes today</small>
         </div>
 
         <div className="stat-card">
@@ -850,25 +888,25 @@ function App() {
             </button>
           </div>
 
-          {todaySlots.length === 0 ? (
+          {todaySchedule.length === 0 ? (
             <p className="module-empty">
               No classes scheduled for today.
             </p>
-          ) : todaySlots.map(slot => (
-            <div className="class-item" key={slot.id}>
-              <div className="class-indicator purple" />
+          ) : todaySchedule.map(item => (
+            <div className="class-item" key={`${item.type}-${item.id}`}>
+              <div className={`class-indicator ${item.type === "Makeup" ? "orange" : "purple"}`} />
               <div className="class-details">
                 <strong>
-                  {getCourse(slot.courseId)?.name ?? "Course"}
+                  {getCourse(item.courseId)?.name ?? "Course"}
                 </strong>
                 <small>
-                  <Clock size={13} /> {slot.start} - {slot.end}
+                  <Clock size={13} /> {item.start} - {item.end}
                 </small>
                 <small>
-                  <MapPin size={13} /> {slot.room || "Room not specified"}
+                  <MapPin size={13} /> {item.room || "Room not specified"}
                 </small>
               </div>
-              <span className="class-status">Class</span>
+              <span className="class-status">{item.type}</span>
             </div>
           ))}
         </div>
@@ -1020,6 +1058,9 @@ function App() {
           <p>Plan and manage your weekly classes.</p>
         </div>
         <div className="toolbar-actions">
+          <button className="secondary-button" onClick={exportTimetableCsv}>
+            Export Timetable CSV
+          </button>
           <button className="secondary-button" onClick={downloadCsvTemplate}>
             Download CSV Template
           </button>
@@ -1080,13 +1121,6 @@ function App() {
                 </div>
                 <div className="module-item-actions">
                   <button
-                    onClick={() => cancelClass(slot)}
-                    aria-label="Cancel class"
-                    title="Cancel this class occurrence"
-                  >
-                    <X size={15} />
-                  </button>
-                  <button
                     onClick={() => openSlotForm(slot)}
                     aria-label="Edit class"
                   >
@@ -1111,52 +1145,56 @@ function App() {
         </p>
       )}
 
-      {/* Cancelled classes list */}
-      <div className="day-section cancelled-classes-section">
-        <h4>Cancelled Classes</h4>
+      <div className="attendance-form makeup-form">
+        <h4>Add One-Time Makeup Class</h4>
+        <form onSubmit={addMakeupClass}>
+          <div className="form-grid">
+            <div className="field-group">
+              <label>Course</label>
+              <select value={makeupCourse} onChange={e => setMakeupCourse(e.target.value)} required>
+                <option value="">Select course</option>
+                {courses.map(course => <option key={course.id} value={course.id}>{course.code} - {course.name}</option>)}
+              </select>
+            </div>
+            <div className="field-group">
+              <label>Date</label>
+              <input type="date" value={makeupDate} onChange={e => setMakeupDate(e.target.value)} required />
+            </div>
+            <div className="field-group">
+              <label>Start Time</label>
+              <input type="time" value={makeupStart} onChange={e => setMakeupStart(e.target.value)} required />
+            </div>
+            <div className="field-group">
+              <label>End Time</label>
+              <input type="time" value={makeupEnd} onChange={e => setMakeupEnd(e.target.value)} required />
+            </div>
+            <div className="field-group">
+              <label>Room</label>
+              <input value={makeupRoom} onChange={e => setMakeupRoom(e.target.value)} placeholder="Room / Lab" />
+            </div>
+            <div className="field-group">
+              <label>Note (optional)</label>
+              <input value={makeupNote} onChange={e => setMakeupNote(e.target.value)} placeholder="Reason or details" />
+            </div>
+          </div>
+          {makeupError && <div className="auth-error">{makeupError}</div>}
+          <button className="primary-button" type="submit"><Plus size={16} /> Add Makeup Class</button>
+        </form>
+      </div>
 
-        {cancelledClasses.length === 0 ? (
-          <p className="module-empty">
-            No cancelled classes yet.
-          </p>
-        ) : (
-          [...cancelledClasses]
-            .sort((a, b) => b.date.localeCompare(a.date))
-            .map(item => {
-              const slot = slots.find(existing => existing.id === item.slotId);
-              const course = slot ? getCourse(slot.courseId) : undefined;
-
-              if (!slot) return null;
-
-              return (
-                <div className="module-item" key={item.id}>
-                  <div
-                    className="module-item-color"
-                    style={{ background: course?.color ?? "#8974e8" }}
-                  />
-                  <div className="module-item-main">
-                    <strong>{course?.name ?? "Course"}</strong>
-                    <span>
-                      {course?.code ?? "—"} · {item.date} · {slot.day}
-                    </span>
-                    <span>Reason: {item.reason}</span>
-                  </div>
-                  <div className="module-time">
-                    <Clock size={14} /> {slot.start} - {slot.end}
-                  </div>
-                  <div className="module-item-actions">
-                    <button
-                      onClick={() => restoreClass(item.id)}
-                      aria-label="Restore cancelled class"
-                      title="Restore class"
-                    >
-                      <CheckCircle2 size={16} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-        )}
+      <div className="day-section">
+        <h4>One-Time Makeup Classes</h4>
+        {makeupClasses.length === 0 ? <p className="module-empty">No makeup classes added yet.</p> : [...makeupClasses].sort((a,b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`)).map(item => (
+          <div className="module-item" key={item.id}>
+            <div className="module-item-color" style={{ background: getCourse(item.courseId)?.color ?? "#8974e8" }} />
+            <div className="module-item-main">
+              <strong>{getCourse(item.courseId)?.name ?? "Course removed"}</strong>
+              <span>{item.date} · {item.room || "Room not specified"}{item.note ? ` · ${item.note}` : ""}</span>
+            </div>
+            <div className="module-time"><Clock size={14} /> {item.start} - {item.end}</div>
+            <div className="module-item-actions"><button onClick={() => deleteMakeupClass(item.id)} aria-label="Delete makeup class"><Trash2 size={15} /></button></div>
+          </div>
+        ))}
       </div>
 
       {showCsvPreview && (
@@ -1246,6 +1284,14 @@ function App() {
         </div>
       </div>
 
+      <div className="toolbar-actions assignment-filters">
+        {(["all", "pending", "completed", "overdue"] as const).map(filter => (
+          <button key={filter} className={assignmentFilter === filter ? "primary-button" : "secondary-button"} onClick={() => setAssignmentFilter(filter)}>
+            {filter.charAt(0).toUpperCase() + filter.slice(1)}
+          </button>
+        ))}
+      </div>
+
       {assignments.length === 0 ? (
         <div className="empty-state">
           <ClipboardList size={35} />
@@ -1253,13 +1299,9 @@ function App() {
           <p>Add your assignments, quizzes and exams.</p>
         </div>
       ) : (
-        [...assignments]
-          .sort((a, b) =>
-            `${a.dueDate} ${a.dueTime}`.localeCompare(
-              `${b.dueDate} ${b.dueTime}`
-            )
-          )
-          .map(item => (
+        filteredAssignments.length === 0 ? (
+          <p className="module-empty">No {assignmentFilter} assignments found.</p>
+        ) : filteredAssignments.map(item => (
             <div
               className={`module-item assignment-item ${item.completed ? "is-completed" : ""}`}
               key={item.id}
@@ -1734,11 +1776,28 @@ function App() {
         {activePage === "Attendance History" && renderHistory()}
 
         {activePage === "Settings" && (
-          <div className="empty-state">
-            <Settings size={38} />
-            <h3>Settings</h3>
-            <p>Account settings will be added in a later step.</p>
-          </div>
+          <section className="module-page">
+            <div className="module-toolbar"><div><h3>Account Settings</h3><p>Update your profile and manage your SemesterSync data.</p></div></div>
+            <div className="attendance-form">
+              <h4>Profile Information</h4>
+              <form onSubmit={saveSettings}>
+                <div className="form-grid">
+                  <div className="field-group"><label>Full Name</label><input value={settingsName} onChange={e => setSettingsName(e.target.value)} required /></div>
+                  <div className="field-group"><label>Email Address</label><input type="email" value={settingsEmail} onChange={e => setSettingsEmail(e.target.value)} required /></div>
+                </div>
+                <button className="primary-button" type="submit"><Save size={16} /> Save Profile</button>
+              </form>
+              {settingsMessage && <p className="module-hint">{settingsMessage}</p>}
+            </div>
+            <div className="attendance-form">
+              <h4>Data Management</h4>
+              <p className="module-hint">Download a backup of your academic data or clear the current semester records. Passwords are not included in the backup.</p>
+              <div className="toolbar-actions">
+                <button className="secondary-button" onClick={exportAllData}>Export All Data (JSON)</button>
+                <button className="absent-button" onClick={resetAcademicData}><Trash2 size={16} /> Reset Academic Data</button>
+              </div>
+            </div>
+          </section>
         )}
 
         <footer>
