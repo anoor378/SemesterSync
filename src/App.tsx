@@ -56,6 +56,13 @@ type AttendanceRecord = {
   status: "Present" | "Absent";
 };
 
+type CancelledClass = {
+  id: number;
+  slotId: number;
+  date: string;
+  reason: string;
+};
+
 const initialCourses: Course[] = [
   { id: 1, code: "CS301", name: "Data Warehousing", color: "#8974e8" },
   { id: 2, code: "CS402", name: "Deep Learning", color: "#55a8e9" },
@@ -106,6 +113,11 @@ function App() {
 
   const [attendance, setAttendance] = useState<AttendanceRecord[]>(() =>
     readStorage("semestersync_attendance", [])
+  );
+
+  // Cancelled classes are stored separately from weekly timetable slots.
+  const [cancelledClasses, setCancelledClasses] = useState<CancelledClass[]>(() =>
+    readStorage("semestersync_cancelled_classes", [])
   );
 
   const [activePage, setActivePage] = useState("Dashboard");
@@ -167,6 +179,13 @@ function App() {
     localStorage.setItem("semestersync_attendance", JSON.stringify(attendance));
   }, [attendance]);
 
+  useEffect(() => {
+    localStorage.setItem(
+      "semestersync_cancelled_classes",
+      JSON.stringify(cancelledClasses)
+    );
+  }, [cancelledClasses]);
+
   const getCourse = (id: number) =>
     courses.find(course => course.id === id);
 
@@ -188,8 +207,15 @@ function App() {
     String(now.getMinutes()).padStart(2, "0")
   ].join(":");
 
+  // Hide today's cancelled classes from today's dashboard schedule.
   const todaySlots = slots
-    .filter(slot => slot.day === todayName)
+    .filter(slot =>
+      slot.day === todayName &&
+      !cancelledClasses.some(cancelled =>
+        cancelled.slotId === slot.id &&
+        cancelled.date === todayDateString
+      )
+    )
     .sort((a, b) => a.start.localeCompare(b.start));
 
   const pendingAssignments = assignments.filter(
@@ -342,10 +368,18 @@ function App() {
       "Delete this course and its related timetable, assignments and attendance?"
     )) return;
 
+    const courseSlotIds = slots
+      .filter(slot => slot.courseId === id)
+      .map(slot => slot.id);
+
     setCourses(previous => previous.filter(course => course.id !== id));
     setSlots(previous => previous.filter(slot => slot.courseId !== id));
     setAssignments(previous => previous.filter(item => item.courseId !== id));
     setAttendance(previous => previous.filter(record => record.courseId !== id));
+
+    setCancelledClasses(previous =>
+      previous.filter(item => !courseSlotIds.includes(item.slotId))
+    );
   };
 
   const openSlotForm = (slot?: Slot) => {
@@ -412,7 +446,93 @@ function App() {
   const deleteSlot = (id: number) => {
     if (window.confirm("Delete this class slot?")) {
       setSlots(previous => previous.filter(slot => slot.id !== id));
+
+      setCancelledClasses(previous =>
+        previous.filter(item => item.slotId !== id)
+      );
     }
+  };
+
+  // Cancel one occurrence of a weekly class without deleting its timetable slot.
+  const cancelClass = (slot: Slot) => {
+    const selectedDate = window.prompt(
+      `Enter the date for this cancelled ${slot.day} class (YYYY-MM-DD):`,
+      todayDateString
+    );
+
+    if (selectedDate === null) return;
+
+    const date = selectedDate.trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      alert("Please enter the date in YYYY-MM-DD format.");
+      return;
+    }
+
+    const parsedDate = new Date(`${date}T00:00:00`);
+
+    if (
+      Number.isNaN(parsedDate.getTime()) ||
+      parsedDate.getFullYear() !== Number(date.slice(0, 4)) ||
+      parsedDate.getMonth() + 1 !== Number(date.slice(5, 7)) ||
+      parsedDate.getDate() !== Number(date.slice(8, 10))
+    ) {
+      alert("Please enter a valid calendar date.");
+      return;
+    }
+
+    const selectedDay = parsedDate.toLocaleDateString("en-US", {
+      weekday: "long"
+    });
+
+    if (selectedDay !== slot.day) {
+      alert(`This class is scheduled on ${slot.day}. Please select a ${slot.day}.`);
+      return;
+    }
+
+    if (date < todayDateString) {
+      alert("You cannot cancel a class for a past date.");
+      return;
+    }
+
+    const alreadyCancelled = cancelledClasses.some(item =>
+      item.slotId === slot.id && item.date === date
+    );
+
+    if (alreadyCancelled) {
+      alert("This class has already been cancelled for the selected date.");
+      return;
+    }
+
+    const reason = window.prompt("Enter the reason for cancelling this class:");
+
+    if (reason === null) return;
+
+    if (!reason.trim()) {
+      alert("Please enter a cancellation reason.");
+      return;
+    }
+
+    setCancelledClasses(previous => [
+      ...previous,
+      {
+        id: Date.now(),
+        slotId: slot.id,
+        date,
+        reason: reason.trim()
+      }
+    ]);
+
+    alert("Class cancelled successfully.");
+  };
+
+  // Restore a previously cancelled class occurrence.
+  const restoreClass = (id: number) => {
+    if (!window.confirm("Restore this cancelled class?")) return;
+
+    setCancelledClasses(previous =>
+      previous.filter(item => item.id !== id)
+    );
   };
 
   const downloadCsvTemplate = () => {
@@ -960,6 +1080,13 @@ function App() {
                 </div>
                 <div className="module-item-actions">
                   <button
+                    onClick={() => cancelClass(slot)}
+                    aria-label="Cancel class"
+                    title="Cancel this class occurrence"
+                  >
+                    <X size={15} />
+                  </button>
+                  <button
                     onClick={() => openSlotForm(slot)}
                     aria-label="Edit class"
                   >
@@ -983,6 +1110,54 @@ function App() {
           Add your first class to start building your timetable.
         </p>
       )}
+
+      {/* Cancelled classes list */}
+      <div className="day-section cancelled-classes-section">
+        <h4>Cancelled Classes</h4>
+
+        {cancelledClasses.length === 0 ? (
+          <p className="module-empty">
+            No cancelled classes yet.
+          </p>
+        ) : (
+          [...cancelledClasses]
+            .sort((a, b) => b.date.localeCompare(a.date))
+            .map(item => {
+              const slot = slots.find(existing => existing.id === item.slotId);
+              const course = slot ? getCourse(slot.courseId) : undefined;
+
+              if (!slot) return null;
+
+              return (
+                <div className="module-item" key={item.id}>
+                  <div
+                    className="module-item-color"
+                    style={{ background: course?.color ?? "#8974e8" }}
+                  />
+                  <div className="module-item-main">
+                    <strong>{course?.name ?? "Course"}</strong>
+                    <span>
+                      {course?.code ?? "—"} · {item.date} · {slot.day}
+                    </span>
+                    <span>Reason: {item.reason}</span>
+                  </div>
+                  <div className="module-time">
+                    <Clock size={14} /> {slot.start} - {slot.end}
+                  </div>
+                  <div className="module-item-actions">
+                    <button
+                      onClick={() => restoreClass(item.id)}
+                      aria-label="Restore cancelled class"
+                      title="Restore class"
+                    >
+                      <CheckCircle2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+        )}
+      </div>
 
       {showCsvPreview && (
         <div className="modal-overlay" onClick={() => setShowCsvPreview(false)}>
