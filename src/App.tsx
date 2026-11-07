@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ChangeEvent } from "react";
 import {
   LayoutDashboard, CalendarDays, BookOpen, ClipboardList,
   ClipboardCheck, Settings, Search, Plus, Clock, MapPin,
@@ -27,6 +27,16 @@ type Slot = {
   start: string;
   end: string;
   room: string;
+};
+
+type CsvPreviewRow = {
+  courseCode: string;
+  day: string;
+  start: string;
+  end: string;
+  room: string;
+  valid: boolean;
+  error: string;
 };
 
 type Assignment = {
@@ -115,6 +125,9 @@ function App() {
   const [slotEnd, setSlotEnd] = useState("10:00");
   const [slotRoom, setSlotRoom] = useState("");
   const [slotError, setSlotError] = useState("");
+  const [csvPreview, setCsvPreview] = useState<CsvPreviewRow[]>([]);
+  const [csvError, setCsvError] = useState("");
+  const [showCsvPreview, setShowCsvPreview] = useState(false);
 
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [editingAssignmentId, setEditingAssignmentId] = useState<number | null>(null);
@@ -400,6 +413,142 @@ function App() {
     if (window.confirm("Delete this class slot?")) {
       setSlots(previous => previous.filter(slot => slot.id !== id));
     }
+  };
+
+  const downloadCsvTemplate = () => {
+    const content = "Course Code,Day,Start,End,Room\nCS301,Monday,09:00,10:00,Room 101\n";
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "semestersync-timetable-template.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const parseCsvLine = (line: string) => {
+    const values: string[] = [];
+    let value = "";
+    let insideQuotes = false;
+
+    for (let index = 0; index < line.length; index += 1) {
+      const character = line[index];
+      if (character === '"') {
+        if (insideQuotes && line[index + 1] === '"') {
+          value += '"';
+          index += 1;
+        } else {
+          insideQuotes = !insideQuotes;
+        }
+      } else if (character === "," && !insideQuotes) {
+        values.push(value.trim());
+        value = "";
+      } else {
+        value += character;
+      }
+    }
+
+    values.push(value.trim());
+    return values;
+  };
+
+  const handleCsvUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCsvError("");
+    setCsvPreview([]);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result ?? "").replace(/^\uFEFF/, "");
+      const lines = text.split(/\r?\n/).filter(line => line.trim() !== "");
+
+      if (lines.length < 2) {
+        setCsvError("CSV file is empty or has no timetable rows.");
+        setShowCsvPreview(true);
+        return;
+      }
+
+      const headers = parseCsvLine(lines[0]).map(header => header.toLowerCase());
+      const requiredHeaders = ["course code", "day", "start", "end", "room"];
+      const missingHeaders = requiredHeaders.filter(header => !headers.includes(header));
+
+      if (missingHeaders.length > 0) {
+        setCsvError(`Missing CSV columns: ${missingHeaders.join(", ")}. Download the template and use its exact headings.`);
+        setShowCsvPreview(true);
+        return;
+      }
+
+      const column = (name: string) => headers.indexOf(name);
+      const rows: CsvPreviewRow[] = lines.slice(1).map(line => {
+        const values = parseCsvLine(line);
+        const row: CsvPreviewRow = {
+          courseCode: values[column("course code")] ?? "",
+          day: values[column("day")] ?? "",
+          start: values[column("start")] ?? "",
+          end: values[column("end")] ?? "",
+          room: values[column("room")] ?? "",
+          valid: true,
+          error: ""
+        };
+
+        const course = courses.find(item => item.code.toLowerCase() === row.courseCode.toLowerCase());
+        if (!course) row.error = "Course code does not exist.";
+        else if (!weekdays.some(day => day.toLowerCase() === row.day.toLowerCase())) row.error = "Invalid weekday.";
+        else if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(row.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(row.end)) row.error = "Time must use HH:MM format.";
+        else if (row.start >= row.end) row.error = "End time must be later than start time.";
+        else {
+          row.day = weekdays.find(day => day.toLowerCase() === row.day.toLowerCase()) ?? row.day;
+          const existingClash = slots.find(slot => slot.day === row.day && row.start < slot.end && row.end > slot.start);
+          if (existingClash) row.error = `Clashes with an existing class (${existingClash.start}-${existingClash.end}).`;
+        }
+
+        row.valid = row.error === "";
+        return row;
+      });
+
+      // Also detect clashes between rows in the uploaded CSV.
+      rows.forEach((row, index) => {
+        if (!row.valid) return;
+        const clash = rows.slice(0, index).find(previous =>
+          previous.valid && previous.day === row.day && row.start < previous.end && row.end > previous.start
+        );
+        if (clash) {
+          row.valid = false;
+          row.error = "Clashes with another row in this CSV.";
+        }
+      });
+
+      setCsvPreview(rows);
+      setShowCsvPreview(true);
+    };
+    reader.onerror = () => {
+      setCsvError("Could not read this file. Please try another CSV file.");
+      setShowCsvPreview(true);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  const importValidCsvRows = () => {
+    const validRows = csvPreview.filter(row => row.valid);
+    if (validRows.length === 0) return;
+
+    const importedSlots: Slot[] = validRows.map(row => ({
+      id: Date.now() + Math.floor(Math.random() * 1000000),
+      courseId: courses.find(course => course.code.toLowerCase() === row.courseCode.toLowerCase())!.id,
+      day: row.day,
+      start: row.start,
+      end: row.end,
+      room: row.room
+    }));
+
+    setSlots(previous => [...previous, ...importedSlots]);
+    setShowCsvPreview(false);
+    setCsvPreview([]);
+    setCsvError("");
+    alert(`${importedSlots.length} class(es) imported successfully.`);
   };
 
   const openAssignmentForm = (item?: Assignment) => {
@@ -751,6 +900,19 @@ function App() {
           <p>Plan and manage your weekly classes.</p>
         </div>
         <div className="toolbar-actions">
+          <button className="secondary-button" onClick={downloadCsvTemplate}>
+            Download CSV Template
+          </button>
+          <button className="secondary-button" onClick={() => document.getElementById("timetable-csv-upload")?.click()}>
+            Import CSV
+          </button>
+          <input
+            id="timetable-csv-upload"
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: "none" }}
+            onChange={handleCsvUpload}
+          />
           <button
             className="secondary-button"
             onClick={() => window.print()}
@@ -820,6 +982,61 @@ function App() {
         <p className="module-hint">
           Add your first class to start building your timetable.
         </p>
+      )}
+
+      {showCsvPreview && (
+        <div className="modal-overlay" onClick={() => setShowCsvPreview(false)}>
+          <div className="course-modal" onClick={event => event.stopPropagation()}>
+            <div className="modal-heading">
+              <div>
+                <h3>CSV Import Preview</h3>
+                <p>Review the rows before adding them to your timetable.</p>
+              </div>
+              <button className="close-button" onClick={() => setShowCsvPreview(false)}>
+                <X size={21} />
+              </button>
+            </div>
+
+            {csvError && <div className="auth-error"><AlertTriangle size={15} /> {csvError}</div>}
+
+            {csvPreview.length > 0 && (
+              <>
+                <p className="module-hint">
+                  {csvPreview.filter(row => row.valid).length} valid row(s), {csvPreview.filter(row => !row.valid).length} row(s) with errors.
+                </p>
+                <div className="history-table-wrap">
+                  <table className="history-table">
+                    <thead>
+                      <tr><th>Course</th><th>Day</th><th>Time</th><th>Room</th><th>Status</th></tr>
+                    </thead>
+                    <tbody>
+                      {csvPreview.map((row, index) => (
+                        <tr key={`${row.courseCode}-${row.day}-${row.start}-${index}`}>
+                          <td>{row.courseCode}</td>
+                          <td>{row.day}</td>
+                          <td>{row.start} - {row.end}</td>
+                          <td>{row.room || "—"}</td>
+                          <td>
+                            <span className={`status-pill ${row.valid ? "present" : "absent"}`}>
+                              {row.valid ? "Valid" : row.error}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            <div className="modal-actions">
+              <button className="cancel-button" onClick={() => setShowCsvPreview(false)}>Cancel</button>
+              <button className="primary-button" onClick={importValidCsvRows} disabled={!csvPreview.some(row => row.valid)}>
+                Import Valid Classes
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );
