@@ -8,6 +8,11 @@ import {
 } from "lucide-react";
 import "./App.css";
 
+// ==========================================
+// DATA TYPES
+// Defines the structure of courses, accounts, timetable slots,
+// assignments, makeup classes, attendance and CSV preview rows.
+// ==========================================
 type Course = {
   id: number;
   code: string;
@@ -67,6 +72,10 @@ type AttendanceRecord = {
   status: "Present" | "Absent";
 };
 
+// ==========================================
+// DEFAULT DATA & CONSTANTS
+// Initial sample courses and weekdays used by the timetable.
+// ==========================================
 const initialCourses: Course[] = [
   { id: 1, code: "CS301", name: "Data Warehousing", color: "#8974e8" },
   { id: 2, code: "CS402", name: "Deep Learning", color: "#55a8e9" },
@@ -78,6 +87,10 @@ const weekdays = [
   "Thursday", "Friday", "Saturday"
 ];
 
+// ==========================================
+// LOCAL STORAGE HELPER
+// Loads saved application data and safely uses fallback data if needed.
+// ==========================================
 const readStorage = <T,>(key: string, fallback: T): T => {
   try {
     const value = localStorage.getItem(key);
@@ -88,6 +101,10 @@ const readStorage = <T,>(key: string, fallback: T): T => {
 };
 
 function App() {
+  // ==========================================
+  // APPLICATION STATE
+  // Stores account details, academic records, form values and active page.
+  // ==========================================
   const [accounts, setAccounts] = useState<Account[]>(() =>
     readStorage("semestersync_accounts", [])
   );
@@ -169,6 +186,10 @@ function App() {
   );
   const [historyCourseFilter, setHistoryCourseFilter] = useState("all");
 
+  // ==========================================
+  // DATA PERSISTENCE
+  // Keeps account and academic data saved in the browser between visits.
+  // ==========================================
   useEffect(() => {
     localStorage.setItem("semestersync_accounts", JSON.stringify(accounts));
   }, [accounts]);
@@ -204,6 +225,10 @@ function App() {
     }
   }, [currentUser]);
 
+  // ==========================================
+  // SHARED HELPERS & DASHBOARD CALCULATIONS
+  // Looks up courses and prepares today's schedule, task status and attendance totals.
+  // ==========================================
   const getCourse = (id: number) =>
     courses.find(course => course.id === id);
 
@@ -315,6 +340,10 @@ function App() {
     return Math.round((present / records.length) * 100);
   };
 
+  // ==========================================
+  // LOGIN, SIGNUP & LOGOUT
+  // Creates accounts, validates login details and manages the active session.
+  // ==========================================
   const handleAuth = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setAuthError("");
@@ -369,6 +398,10 @@ function App() {
     setAuthError("");
   };
 
+  // ==========================================
+  // COURSE MANAGEMENT
+  // Adds, edits and deletes courses and removes their related academic records.
+  // ==========================================
   const openCourseForm = (course?: Course) => {
     setEditingCourseId(course?.id ?? null);
     setCourseName(course?.name ?? "");
@@ -423,6 +456,10 @@ function App() {
     setMakeupClasses(previous => previous.filter(item => item.courseId !== id));
   };
 
+  // ==========================================
+  // WEEKLY TIMETABLE MANAGEMENT
+  // Adds, edits and deletes recurring class slots with time-clash validation.
+  // ==========================================
   const openSlotForm = (slot?: Slot) => {
     setEditingSlotId(slot?.id ?? null);
     setSlotCourse(String(slot?.courseId ?? courses[0]?.id ?? ""));
@@ -490,6 +527,10 @@ function App() {
     }
   };
 
+  // ==========================================
+  // ONE-TIME MAKEUP CLASS MANAGEMENT
+  // Adds and deletes dated makeup classes and checks schedule overlaps.
+  // ==========================================
   const addMakeupClass = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setMakeupError("");
@@ -526,6 +567,10 @@ function App() {
     }
   };
 
+  // ==========================================
+  // TIMETABLE CSV EXPORT
+  // Converts the weekly timetable into a downloadable CSV file.
+  // ==========================================
   const exportTimetableCsv = () => {
     const rows = [
       ["Course Code", "Course Name", "Day", "Start", "End", "Room"],
@@ -541,6 +586,10 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
+  // ==========================================
+  // ACCOUNT SETTINGS & DATA BACKUP
+  // Updates profile information, exports academic data and resets records.
+  // ==========================================
   const saveSettings = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!currentUser) return;
@@ -573,6 +622,10 @@ function App() {
     setSettingsMessage("Academic data has been reset.");
   };
 
+  // ==========================================
+  // TIMETABLE CSV IMPORT / EXPORT
+  // Downloads a template, parses uploaded CSV files, validates rows and imports valid classes.
+  // ==========================================
   const downloadCsvTemplate = () => {
     const content = "Course Code,Day,Start,End,Room\nCS301,Monday,09:00,10:00,Room 101\n";
     const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
@@ -709,6 +762,10 @@ function App() {
     alert(`${importedSlots.length} class(es) imported successfully.`);
   };
 
+  // ==========================================
+  // ASSIGNMENTS & EXAMS MANAGEMENT
+  // Creates, edits, completes and deletes academic deadlines.
+  // ==========================================
   const openAssignmentForm = (item?: Assignment) => {
     setEditingAssignmentId(item?.id ?? null);
     setAssignmentTitle(item?.title ?? "");
@@ -768,6 +825,10 @@ function App() {
     ));
   };
 
+  // ==========================================
+  // ATTENDANCE MANAGEMENT
+  // Records present/absent sessions, updates existing records and maintains history.
+  // ==========================================
   const markAttendance = (status: "Present" | "Absent") => {
     if (!attendanceCourse) {
       alert("Please select a course.");
@@ -818,6 +879,10 @@ function App() {
     )
     .sort((a, b) => b.date.localeCompare(a.date));
 
+  // ==========================================
+  // DASHBOARD FEATURE
+  // Displays academic statistics, today's regular/makeup classes and upcoming deadlines.
+  // ==========================================
   const renderDashboard = () => (
     <>
       <section className="welcome-banner">
@@ -968,6 +1033,10 @@ function App() {
     </>
   );
 
+  // ==========================================
+  // MY COURSES PAGE
+  // Displays searchable course cards and course management actions.
+  // ==========================================
   const renderCourses = () => (
     <section className="courses-page">
       <div className="courses-toolbar">
@@ -1050,6 +1119,10 @@ function App() {
     </section>
   );
 
+  // ==========================================
+  // TIMETABLE PAGE
+  // Displays weekly class slots, makeup classes and CSV import/export controls.
+  // ==========================================
   const renderTimetable = () => (
     <section className="module-page">
       <div className="module-toolbar">
@@ -1254,6 +1327,10 @@ function App() {
     </section>
   );
 
+  // ==========================================
+  // ASSIGNMENTS & EXAMS PAGE
+  // Displays deadlines with all, pending, completed and overdue filters.
+  // ==========================================
   const renderAssignments = () => (
     <section className="module-page">
       <div className="module-toolbar">
@@ -1349,6 +1426,10 @@ function App() {
     </section>
   );
 
+  // ==========================================
+  // ATTENDANCE PAGE
+  // Records class attendance and displays course-wise attendance percentages.
+  // ==========================================
   const renderAttendance = () => (
     <section className="module-page">
       <div className="module-toolbar">
@@ -1454,6 +1535,10 @@ function App() {
     </section>
   );
 
+  // ==========================================
+  // ATTENDANCE HISTORY PAGE
+  // Shows recorded sessions with course filtering and delete actions.
+  // ==========================================
   const renderHistory = () => (
     <section className="module-page">
       <div className="module-toolbar">
@@ -1539,6 +1624,10 @@ function App() {
     </section>
   );
 
+  // ==========================================
+  // LOGIN / SIGNUP SCREEN
+  // Renders authentication UI when no account is currently logged in.
+  // ==========================================
   if (!currentUser) {
     return (
       <div className="auth-page">
@@ -1679,8 +1768,16 @@ function App() {
     );
   }
 
+  // ==========================================
+  // MAIN APPLICATION LAYOUT
+  // Renders sidebar navigation, topbar, selected page and global dialogs.
+  // ==========================================
   return (
-    <div className="app-layout">
+    <div className="app-layout semestersync-readable">
+      {/* ==========================================
+          SIDEBAR NAVIGATION
+          Provides links to all application modules and the user profile.
+          ========================================== */}
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon">S</div>
@@ -1743,6 +1840,10 @@ function App() {
         </div>
       </aside>
 
+      {/* ==========================================
+          MAIN CONTENT AREA & TOPBAR
+          Displays the current page heading and selected feature screen.
+          ========================================== */}
       <main className="main-content">
         <header className="topbar">
           <div>
@@ -1775,6 +1876,10 @@ function App() {
         {activePage === "Attendance" && renderAttendance()}
         {activePage === "Attendance History" && renderHistory()}
 
+        {/* ==========================================
+            SETTINGS PAGE
+            Allows profile updates, academic data export and data reset.
+            ========================================== */}
         {activePage === "Settings" && (
           <section className="module-page">
             <div className="module-toolbar"><div><h3>Account Settings</h3><p>Update your profile and manage your SemesterSync data.</p></div></div>
@@ -1805,6 +1910,14 @@ function App() {
         </footer>
       </main>
 
+      {/* ==========================================
+          GLOBAL FORM MODALS
+          The following dialogs handle course, timetable and assignment forms.
+          ========================================== */}
+      {/* ==========================================
+          COURSE FORM MODAL
+          Adds a new course or edits the selected course.
+          ========================================== */}
       {showCourseModal && (
         <div
           className="modal-overlay"
@@ -1884,6 +1997,10 @@ function App() {
         </div>
       )}
 
+      {/* ==========================================
+          TIMETABLE CLASS FORM MODAL
+          Adds or edits a recurring weekly class.
+          ========================================== */}
       {showSlotForm && (
         <div
           className="modal-overlay"
@@ -1984,6 +2101,10 @@ function App() {
         </div>
       )}
 
+      {/* ==========================================
+          ASSIGNMENT / EXAM FORM MODAL
+          Adds or edits an academic deadline.
+          ========================================== */}
       {showAssignmentForm && (
         <div
           className="modal-overlay"
