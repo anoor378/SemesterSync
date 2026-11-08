@@ -1,75 +1,108 @@
-# React + TypeScript + Vite
+# SemesterSync – Semester Schedule & Deadline Manager
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A student-focused web application designed to organize academic activities in one place. SemesterSync helps students manage their courses, weekly class schedules, assignments, exams, and attendance through a simple and responsive dashboard.
 
-Currently, two official plugins are available:
+## Overview
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Students often manage their academic schedules and deadlines across multiple platforms, making it difficult to stay organized. SemesterSync brings essential academic information together in one application, helping students keep track of their semester activities more efficiently.
 
-## React Compiler
+## Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **User Authentication:** Sign up, log in, and manage a personal profile.
+- **Dashboard:** View academic information and important upcoming activities.
+- **Course Management:** Add, edit, view, and delete courses.
+- **Weekly Timetable:** Organize classes by weekday, time, and room.
+- **Class Clash Detection:** Identify overlapping class schedules.
+- **Makeup Classes:** Manage one-time makeup class schedules.
+- **Assignments & Exams:** Track academic deadlines and completion status.
+- **Attendance Tracking:** Record attendance and view course-wise attendance statistics.
+- **Attendance History:** Review previously recorded attendance.
+- **Data Persistence:** Store application data locally using browser LocalStorage.
+- **Responsive Interface:** Designed for desktop and mobile screens.
 
-## Expanding the ESLint configuration
+## Technology Stack
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+| Technology | Purpose |
+|---|---|
+| React | Frontend development |
+| TypeScript | Type safety and data models |
+| CSS | Styling and responsive layouts |
+| Vite | Development server and build tool |
+| React Hooks | State and component management |
+| LocalStorage | Client-side data persistence |
+| Lucide React | Icons |
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Project Structure
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```text
+SemesterSync/
+│
+├── public/
+├── src/
+│   ├── App.tsx
+│   ├── App.css
+│   └── main.tsx
+│
+├── index.html
+├── package.json
+├── package-lock.json
+├── tsconfig.json
+├── vite.config.ts
+└── README.md
 ```
 
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
+## Getting Started
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### 1. Clone the Repository
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+git clone https://github.com/anoor378/SemesterSync.git
 ```
+
+### 2. Navigate to the Project
+
+```bash
+cd SemesterSync
+```
+
+### 3. Install Dependencies
+
+```bash
+npm install
+```
+
+### 4. Start the Development Server
+
+```bash
+npm run dev
+```
+
+Open the local URL displayed in your terminal to access SemesterSync.
+
+## Current Development Status
+
+SemesterSync is currently under development.
+
+The frontend includes the core academic management interface and major student-facing modules. Backend integration, database connectivity, and additional functionality are planned for future development.
+
+## Future Improvements
+
+- Node.js and Express backend integration.
+- Database connectivity using MongoDB or MySQL.
+- Backend-based authentication and user ownership.
+- Redux Toolkit for shared authentication state.
+- CSV timetable import with validation and preview.
+- Timetable sharing through unique codes.
+- Date-specific class cancellation and exceptions.
+- API integration and improved data synchronization.
+
+## Project Information
+
+**Project:** SemesterSync – Semester Schedule & Deadline Manager  
+**Course:** Web Programming  
+**Semester:** Fall 2026  
+**Frontend:** React + TypeScript + CSS
+
+---
+
+*SemesterSync – Keep your semester organized, one schedule at a time.*
