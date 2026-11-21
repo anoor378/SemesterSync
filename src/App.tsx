@@ -8,15 +8,9 @@ import {
   Download, Share2, Copy, CalendarX, Menu
 } from "lucide-react";
 import "./App.css";
+import { api, getToken, setToken, clearToken, type AuthUser } from "./api/client";
 
 // Types used throughout the application
-type Account = {
-  id: string;
-  name: string;
-  email: string;
-  password: string;
-};
-
 type Course = {
   id: string;
   code: string;
@@ -75,12 +69,6 @@ type AcademicData = {
   attendance: Attendance[];
 };
 
-type ShareSnapshot = {
-  code: string;
-  courses: Course[];
-  slots: Slot[];
-};
-
 type CsvRow = {
   code: string;
   name: string;
@@ -109,17 +97,6 @@ const EMPTY_DATA: AcademicData = {
   deadlines: [],
   attendance: []
 };
-
-const createId = () => crypto.randomUUID();
-
-function readStorage<T>(key: string, fallback: T): T {
-  try {
-    const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) as T : fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 function todayString() {
   const date = new Date();
@@ -151,14 +128,8 @@ function downloadFile(content: string, filename: string, type: string) {
 }
 
 function App() {
-  // Account information is stored separately from academic records.
-  const [accounts, setAccounts] = useState<Account[]>(() =>
-    readStorage("ss_accounts", [])
-  );
-  const [currentUser, setCurrentUser] = useState<string | null>(() =>
-    readStorage("ss_current_user", null)
-  );
-
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(Boolean(getToken()));
   const [data, setData] = useState<AcademicData>(EMPTY_DATA);
   const [loadedUser, setLoadedUser] = useState<string | null>(null);
 
@@ -222,46 +193,44 @@ function App() {
   const [importCode, setImportCode] = useState("");
   const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
 
-  const user = accounts.find(account => account.id === currentUser);
+  async function reloadData() {
+    const kinds = ["courses", "slots", "exceptions", "makeupClasses", "deadlines", "attendance"] as const;
+    const values = await Promise.all(kinds.map(kind => api.get<AcademicData[typeof kind]>(`/${kind}`)));
+    const next = {} as AcademicData;
+    kinds.forEach((kind, i) => { (next as unknown as Record<string, unknown>)[kind] = values[i]; });
+    setData(next);
+  }
 
-  // Load the selected student's records when their account changes.
   useEffect(() => {
-    if (!currentUser) {
-      setData(EMPTY_DATA);
-      setLoadedUser(null);
-      return;
+    let cancelled = false;
+    async function restoreSession() {
+      if (!getToken()) { setAuthLoading(false); return; }
+      try {
+        const result = await api.get<{user: AuthUser}>("/auth/me");
+        if (cancelled) return;
+        setUser(result.user);
+        await reloadData();
+        if (!cancelled) setLoadedUser(result.user.id);
+      } catch {
+        if (!cancelled) { clearToken(); setUser(null); setLoadedUser(null); }
+      } finally { if (!cancelled) setAuthLoading(false); }
     }
+    void restoreSession();
+    return () => { cancelled = true; };
+  }, []);
 
-    const saved = readStorage<AcademicData>(
-      `ss_data_${currentUser}`,
-      EMPTY_DATA
-    );
-
-    setData(saved);
-    setLoadedUser(currentUser);
-  }, [currentUser]);
-
-  useEffect(() => {
-    localStorage.setItem("ss_accounts", JSON.stringify(accounts));
-  }, [accounts]);
-
-  useEffect(() => {
-    localStorage.setItem("ss_current_user", JSON.stringify(currentUser));
-  }, [currentUser]);
-
-  useEffect(() => {
-    if (currentUser && loadedUser === currentUser) {
-      localStorage.setItem(`ss_data_${currentUser}`, JSON.stringify(data));
-    }
-  }, [data, currentUser, loadedUser]);
+  function errorMessage(err: unknown) {
+    return err instanceof Error ? err.message : "Request failed. Please try again.";
+  }
 
   function notify(text: string, isError = false) {
     setMessage(isError ? "" : text);
     setError(isError ? text : "");
   }
 
-  function updateData(changes: Partial<AcademicData>) {
-    setData(previous => ({ ...previous, ...changes }));
+  async function refreshAfter(action: () => Promise<unknown>, success: string) {
+    try { await action(); await reloadData(); notify(success); return true; }
+    catch (err) { notify(errorMessage(err), true); return false; }
   }
 
   function getCourse(id: string) {
@@ -303,47 +272,34 @@ function App() {
     );
   }
 
-  // Demo login and signup. Backend authentication will replace this later.
-  function handleAuth(event: FormEvent<HTMLFormElement>) {
+  async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const email = authEmail.trim().toLowerCase();
-
     if (authMode === "signup") {
-      if (!authName.trim() || authPassword.length < 6) {
-        return notify("Enter your name and a password of at least 6 characters.", true);
-      }
-      if (authPassword !== confirmPassword) {
-        return notify("Passwords do not match.", true);
-      }
-      if (accounts.some(account => account.email === email)) {
-        return notify("This email is already registered.", true);
-      }
-
-      const account: Account = {
-        id: createId(),
-        name: authName.trim(),
-        email,
-        password: authPassword
-      };
-
-      setAccounts(previous => [...previous, account]);
-      setCurrentUser(account.id);
-    } else {
-      const account = accounts.find(item =>
-        item.email === email && item.password === authPassword
-      );
-      if (!account) return notify("Incorrect email or password.", true);
-      setCurrentUser(account.id);
+      if (!authName.trim() || authPassword.length < 8) return notify("Enter a name and password of at least 8 characters.", true);
+      if (authPassword !== confirmPassword) return notify("Passwords do not match.", true);
     }
-
-    setAuthPassword("");
-    setConfirmPassword("");
-    setPage("Dashboard");
-    notify("");
+    try {
+      const result = await api.post<{user: AuthUser; token: string}>(
+        authMode === "signup" ? "/auth/signup" : "/auth/login",
+        authMode === "signup" ? {name: authName.trim(), email, password: authPassword} : {email, password: authPassword}
+      );
+      setToken(result.token);
+      await reloadData();
+      setUser(result.user);
+      setLoadedUser(result.user.id);
+      setAuthPassword("");
+      setConfirmPassword("");
+      setPage("Dashboard");
+      notify("");
+    } catch (err) { notify(errorMessage(err), true); }
   }
 
   function logout() {
-    setCurrentUser(null);
+    clearToken();
+    setUser(null);
+    setData(EMPTY_DATA);
+    setLoadedUser(null);
     setPage("Dashboard");
     setAuthMode("login");
     notify("");
@@ -358,49 +314,22 @@ function App() {
     setCourseFormOpen(true);
   }
 
-  function saveCourse(event: FormEvent<HTMLFormElement>) {
+  async function saveCourse(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const code = courseCode.trim().toUpperCase();
     const name = courseName.trim();
-
     if (!code || !name) return notify("Course code and name are required.", true);
-    if (data.courses.some(course =>
-      course.code === code && course.id !== editingCourse
-    )) return notify("This course code already exists.", true);
-
-    const course: Course = {
-      id: editingCourse ?? createId(),
-      code, name, color: courseColor
-    };
-
-    updateData({
-      courses: editingCourse
-        ? data.courses.map(item => item.id === editingCourse ? course : item)
-        : [...data.courses, course]
-    });
-
-    setCourseFormOpen(false);
-    notify(editingCourse ? "Course updated successfully." : "Course added successfully.");
+    if (data.courses.some(course => course.code === code && course.id !== editingCourse)) return notify("This course code already exists.", true);
+    const payload = {code, name, color: courseColor};
+    const ok = await refreshAfter(() => editingCourse
+      ? api.patch(`/courses/${editingCourse}`, payload) : api.post('/courses', payload),
+      editingCourse ? "Course updated successfully." : "Course added successfully.");
+    if (ok) setCourseFormOpen(false);
   }
 
-  function deleteCourse(id: string) {
-    if (!window.confirm(
-      "Delete this course and all its classes, deadlines and attendance records?"
-    )) return;
-
-    const removedSlotIds = new Set(
-      data.slots.filter(slot => slot.courseId === id).map(slot => slot.id)
-    );
-
-    setData(previous => ({
-      courses: previous.courses.filter(item => item.id !== id),
-      slots: previous.slots.filter(item => item.courseId !== id),
-      exceptions: previous.exceptions.filter(item => !removedSlotIds.has(item.slotId)),
-      makeupClasses: previous.makeupClasses.filter(item => item.courseId !== id),
-      deadlines: previous.deadlines.filter(item => item.courseId !== id),
-      attendance: previous.attendance.filter(item => item.courseId !== id)
-    }));
-    notify("Course and related records deleted.");
+  async function deleteCourse(id: string) {
+    if (!window.confirm("Delete this course and all its classes, deadlines and attendance records?")) return;
+    await refreshAfter(() => api.delete(`/courses/${id}`), "Course and related records deleted.");
   }
 
   // Weekly timetable management
@@ -414,97 +343,38 @@ function App() {
     setSlotFormOpen(true);
   }
 
-  function saveSlot(event: FormEvent<HTMLFormElement>) {
+  async function saveSlot(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     if (!getCourse(slotCourse)) return notify("Select a valid course.", true);
     if (slotStart >= slotEnd) return notify("End time must be later than start time.", true);
-
     const clash = hasClash(slotDay, slotStart, slotEnd, editingSlot ?? undefined);
-    if (clash) {
-      return notify(
-        `Schedule clash with ${getCourse(clash.courseId)?.name} (${clash.start}–${clash.end}).`,
-        true
-      );
-    }
-
-    const slot: Slot = {
-      id: editingSlot ?? createId(),
-      courseId: slotCourse,
-      day: slotDay,
-      start: slotStart,
-      end: slotEnd,
-      room: slotRoom.trim()
-    };
-
-    updateData({
-      slots: editingSlot
-        ? data.slots.map(item => item.id === editingSlot ? slot : item)
-        : [...data.slots, slot]
-    });
-    setSlotFormOpen(false);
-    notify("Class schedule saved.");
+    if (clash) return notify(`Schedule clash with ${getCourse(clash.courseId)?.name}.`, true);
+    const payload = {courseId: slotCourse, day: slotDay, start: slotStart, end: slotEnd, room: slotRoom.trim()};
+    const ok = await refreshAfter(() => editingSlot ? api.patch(`/slots/${editingSlot}`, payload) : api.post('/slots', payload), "Class schedule saved.");
+    if (ok) setSlotFormOpen(false);
   }
 
-  function deleteSlot(id: string) {
+  async function deleteSlot(id: string) {
     if (!window.confirm("Delete this weekly class?")) return;
-    setData(previous => ({
-      ...previous,
-      slots: previous.slots.filter(slot => slot.id !== id),
-      exceptions: previous.exceptions.filter(item => item.slotId !== id),
-      attendance: previous.attendance.filter(item => item.sessionId !== id)
-    }));
-    notify("Class removed.");
+    await refreshAfter(() => api.delete(`/slots/${id}`), "Class removed.");
   }
 
-  function cancelClass(event: FormEvent<HTMLFormElement>) {
+  async function cancelClass(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const slot = data.slots.find(item => item.id === cancelSlot);
-
-    if (!slot || dayFromDate(cancelDate) !== slot.day) {
-      return notify("Choose a date matching the selected class weekday.", true);
-    }
-    if (isCancelled(slot.id, cancelDate)) {
-      return notify("This class is already cancelled for that date.", true);
-    }
-
-    updateData({
-      exceptions: [
-        ...data.exceptions,
-        { id: createId(), slotId: slot.id, date: cancelDate }
-      ]
-    });
-    notify("Class cancelled for the selected date.");
+    if (!slot || dayFromDate(cancelDate) !== slot.day) return notify("Choose a date matching the selected class weekday.", true);
+    if (isCancelled(slot.id, cancelDate)) return notify("This class is already cancelled for that date.", true);
+    await refreshAfter(() => api.post('/exceptions', {slotId: slot.id, date: cancelDate}), "Class cancelled for the selected date.");
   }
 
-  function addMakeup(event: FormEvent<HTMLFormElement>) {
+  async function addMakeup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!getCourse(makeupCourse)) return notify("Select a course.", true);
     if (makeupStart >= makeupEnd) return notify("Invalid class time.", true);
-
-    const recurringClash = slotsOnDate(makeupDate).some(slot =>
-      overlaps(makeupStart, makeupEnd, slot.start, slot.end)
-    );
-    const makeupClash = data.makeupClasses.some(item =>
-      item.date === makeupDate &&
-      overlaps(makeupStart, makeupEnd, item.start, item.end)
-    );
-
-    if (recurringClash || makeupClash) {
-      return notify("Makeup class overlaps with another class.", true);
-    }
-
-    updateData({
-      makeupClasses: [...data.makeupClasses, {
-        id: createId(),
-        courseId: makeupCourse,
-        date: makeupDate,
-        start: makeupStart,
-        end: makeupEnd,
-        room: makeupRoom.trim()
-      }]
-    });
-    notify("Makeup class added.");
+    const recurringClash = slotsOnDate(makeupDate).some(slot => overlaps(makeupStart, makeupEnd, slot.start, slot.end));
+    const makeupClash = data.makeupClasses.some(item => item.date === makeupDate && overlaps(makeupStart, makeupEnd, item.start, item.end));
+    if (recurringClash || makeupClash) return notify("Makeup class overlaps with another class.", true);
+    await refreshAfter(() => api.post('/makeupClasses', {courseId: makeupCourse, date: makeupDate, start: makeupStart, end: makeupEnd, room: makeupRoom.trim()}), "Makeup class added.");
   }
 
   // Assignments, exams, quizzes and projects
@@ -518,42 +388,23 @@ function App() {
     setDeadlineFormOpen(true);
   }
 
-  function saveDeadline(event: FormEvent<HTMLFormElement>) {
+  async function saveDeadline(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!getCourse(deadlineCourse)) return notify("Select a course.", true);
     if (!deadlineTitle.trim()) return notify("Enter a deadline title.", true);
-
-    const previous = data.deadlines.find(item => item.id === editingDeadline);
-    const item: Deadline = {
-      id: editingDeadline ?? createId(),
-      courseId: deadlineCourse,
-      title: deadlineTitle.trim(),
-      type: deadlineType,
-      dueDate: deadlineDate,
-      dueTime: deadlineTime,
-      completed: previous?.completed ?? false
-    };
-
-    updateData({
-      deadlines: editingDeadline
-        ? data.deadlines.map(entry => entry.id === editingDeadline ? item : entry)
-        : [...data.deadlines, item]
-    });
-    setDeadlineFormOpen(false);
-    notify("Deadline saved successfully.");
+    const payload = {courseId: deadlineCourse, title: deadlineTitle.trim(), type: deadlineType, dueDate: deadlineDate, dueTime: deadlineTime};
+    const ok = await refreshAfter(() => editingDeadline ? api.patch(`/deadlines/${editingDeadline}`, payload) : api.post('/deadlines', payload), "Deadline saved successfully.");
+    if (ok) setDeadlineFormOpen(false);
   }
 
-  function toggleDeadline(id: string) {
-    updateData({
-      deadlines: data.deadlines.map(item =>
-        item.id === id ? { ...item, completed: !item.completed } : item
-      )
-    });
+  async function toggleDeadline(id: string) {
+    const item = data.deadlines.find(entry => entry.id === id);
+    if (item) await refreshAfter(() => api.patch(`/deadlines/${id}`, {completed: !item.completed}), "Deadline updated.");
   }
 
-  function deleteDeadline(id: string) {
+  async function deleteDeadline(id: string) {
     if (!window.confirm("Delete this deadline?")) return;
-    updateData({ deadlines: data.deadlines.filter(item => item.id !== id) });
+    await refreshAfter(() => api.delete(`/deadlines/${id}`), "Deadline deleted.");
   }
 
   // Attendance is recorded against a specific class session and date.
@@ -574,32 +425,15 @@ function App() {
     }))
   ];
 
-  function recordAttendance(event: FormEvent<HTMLFormElement>) {
+  async function recordAttendance(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const session = availableSessions.find(item => item.id === attendanceSession);
     if (!session) return notify("Select a valid class session for this date.", true);
-    if (attendanceDate > todayString()) {
-      return notify("Attendance cannot be recorded for future classes.", true);
-    }
-
-    const duplicate = data.attendance.some(item =>
-      item.courseId === attendanceCourse &&
-      item.date === attendanceDate &&
-      item.sessionId === attendanceSession
-    );
+    if (attendanceDate > todayString()) return notify("Attendance cannot be recorded for future classes.", true);
+    const duplicate = data.attendance.some(item => item.courseId === attendanceCourse && item.date === attendanceDate && item.sessionId === attendanceSession);
     if (duplicate) return notify("Attendance for this session already exists.", true);
-
-    updateData({
-      attendance: [...data.attendance, {
-        id: createId(),
-        courseId: attendanceCourse,
-        sessionId: attendanceSession,
-        date: attendanceDate,
-        status: attendanceStatus
-      }]
-    });
-    setAttendanceSession("");
-    notify("Attendance recorded successfully.");
+    const ok = await refreshAfter(() => api.post('/attendance', {courseId: attendanceCourse, sessionId: attendanceSession, date: attendanceDate, status: attendanceStatus}), "Attendance recorded successfully.");
+    if (ok) setAttendanceSession("");
   }
 
   // CSV values are escaped so exported files can be opened in spreadsheet apps.
@@ -721,108 +555,53 @@ function App() {
     event.target.value = "";
   }
 
-  function confirmCsvImport() {
-    const valid = csvRows.filter(row => !row.error);
+  async function confirmCsvImport() {
+    const valid = csvRows.filter(row => !row.error).map(row => ({code: row.code, name: row.name, day: row.day, start: row.start, end: row.end, room: row.room}));
     if (!valid.length) return notify("No valid rows to import.", true);
-
-    const courses = [...data.courses];
-    const slots = [...data.slots];
-
-    for (const row of valid) {
-      let course = courses.find(item => item.code === row.code);
-      if (!course) {
-        course = {
-          id: createId(),
-          code: row.code,
-          name: row.name,
-          color: COLORS[courses.length % COLORS.length]
-        };
-        courses.push(course);
-      }
-
-      slots.push({
-        id: createId(),
-        courseId: course.id,
-        day: row.day,
-        start: row.start,
-        end: row.end,
-        room: row.room
-      });
-    }
-
-    updateData({ courses, slots });
-    setCsvRows([]);
-    notify(`${valid.length} classes imported successfully.`);
+    const ok = await refreshAfter(() => api.post('/import/confirm', {rows: valid}), `${valid.length} classes imported successfully.`);
+    if (ok) setCsvRows([]);
   }
 
-  // Share codes work between demo accounts using the same browser storage.
-  function generateShareCode() {
+  async function generateShareCode() {
     if (!data.courses.length) return notify("Add courses before sharing.", true);
-
-    const code = `SS-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-    const snapshot: ShareSnapshot = {
-      code,
-      courses: data.courses,
-      slots: data.slots
-    };
-
-    localStorage.setItem(`ss_share_${code}`, JSON.stringify(snapshot));
-    setShareCode(code);
-    notify("Timetable share code generated.");
+    try {
+      const result = await api.post<{code: string}>('/share', {});
+      setShareCode(result.code);
+      notify("Timetable share code generated.");
+    } catch (err) { notify(errorMessage(err), true); }
   }
 
-  function importSharedTimetable() {
-    const snapshot = readStorage<ShareSnapshot | null>(
-      `ss_share_${importCode.trim().toUpperCase()}`, null
-    );
-    if (!snapshot) return notify("Share code not found in this browser.", true);
-
-    const courses = [...data.courses];
-    const slots = [...data.slots];
-    const idMap = new Map<string, string>();
-
-    for (const source of snapshot.courses) {
-      let target = courses.find(course => course.code === source.code);
-      if (!target) {
-        target = { ...source, id: createId() };
-        courses.push(target);
-      }
-      idMap.set(source.id, target.id);
-    }
-
-    for (const source of snapshot.slots) {
-      const courseId = idMap.get(source.courseId);
-      if (!courseId) continue;
-      if (slots.some(slot =>
-        slot.courseId === courseId &&
-        slot.day === source.day &&
-        slot.start === source.start &&
-        slot.end === source.end
-      )) continue;
-
-      slots.push({ ...source, id: createId(), courseId });
-    }
-
-    updateData({ courses, slots });
-    notify("Shared timetable copied. Deadlines and attendance were not copied.");
+  async function importSharedTimetable() {
+    if (!importCode.trim()) return notify("Enter a share code.", true);
+    await refreshAfter(() => api.post(`/share/${encodeURIComponent(importCode.trim().toUpperCase())}/copy`, {}), "Shared timetable copied.");
   }
 
-  function updateProfile(event: FormEvent<HTMLFormElement>) {
+  async function updateProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!user) return;
-
     const name = (event.currentTarget.elements.namedItem("profileName") as HTMLInputElement).value.trim();
-    const email = (event.currentTarget.elements.namedItem("profileEmail") as HTMLInputElement).value.trim().toLowerCase();
+    if (!name) return notify("Name is required.", true);
+    try {
+      const result = await api.patch<{user: AuthUser}>('/auth/me', {name});
+      setUser(result.user);
+      notify("Profile updated successfully.");
+    } catch (err) { notify(errorMessage(err), true); }
+  }
 
-    if (!name || !email) return notify("Name and email are required.", true);
-    if (accounts.some(item => item.email === email && item.id !== user.id)) {
-      return notify("Email already belongs to another account.", true);
-    }
-
-    setAccounts(previous => previous.map(item =>
-      item.id === user.id ? { ...item, name, email } : item
-    ));
-    notify("Profile updated successfully.");
+  async function resetAcademicData() {
+    if (!window.confirm("Delete all your academic data? This cannot be undone.")) return;
+    try {
+      // Deleting courses cascades to related records on the backend.
+      for (const course of data.courses) await api.delete(`/courses/${course.id}`);
+      // Remove any orphaned records too, including cancellations and makeup classes.
+      const kinds = ["slots", "exceptions", "makeupClasses", "deadlines", "attendance"] as const;
+      for (const kind of kinds) {
+        const records = await api.get<Array<{id: string}>>(`/${kind}`);
+        for (const item of records) await api.delete(`/${kind}/${item.id}`);
+      }
+      await reloadData();
+      notify("Academic data reset successfully.");
+    } catch (err) { await reloadData().catch(() => {}); notify(errorMessage(err), true); }
   }
 
   const today = todayString();
@@ -865,7 +644,9 @@ function App() {
     { label: "Settings", icon: Settings }
   ];
 
-  if (!currentUser || !user) {
+  if (authLoading) return <div className="loading-screen">Loading your semester...</div>;
+
+  if (!user) {
     return (
       <div className="auth-page">
         <div className="auth-brand">
@@ -922,13 +703,13 @@ function App() {
               {authMode === "login" ? "Login" : "Create Account"}
             </button>
           </form>
-          <p className="demo-note">Frontend demo: accounts are saved in this browser only.</p>
+          <p className="demo-note">Your account and semester records are saved to the backend.</p>
         </div>
       </div>
     );
   }
 
-  if (loadedUser !== currentUser) {
+  if (loadedUser !== user.id) {
     return <div className="loading-screen">Loading your semester...</div>;
   }
 
@@ -1167,7 +948,7 @@ function App() {
                   const slot = data.slots.find(entry => entry.id === item.slotId);
                   return <div className="simple-list-item" key={item.id}>
                     <span>{getCourse(slot?.courseId ?? "")?.code} · {item.date}</span>
-                    <button onClick={() => updateData({ exceptions: data.exceptions.filter(entry => entry.id !== item.id) })}><Trash2 size={16} /></button>
+                    <button onClick={() => void refreshAfter(() => api.delete(`/exceptions/${item.id}`), "Cancellation removed.")}><Trash2 size={16} /></button>
                   </div>;
                 })}
               </section>
@@ -1193,7 +974,7 @@ function App() {
                 {data.makeupClasses.map(item => (
                   <div className="simple-list-item" key={item.id}>
                     <span>{getCourse(item.courseId)?.code} · {item.date} · {item.start}</span>
-                    <button onClick={() => updateData({ makeupClasses: data.makeupClasses.filter(entry => entry.id !== item.id) })}><Trash2 size={16} /></button>
+                    <button onClick={() => void refreshAfter(() => api.delete(`/makeupClasses/${item.id}`), "Makeup class removed.")}><Trash2 size={16} /></button>
                   </div>
                 ))}
               </section>
@@ -1223,7 +1004,7 @@ function App() {
               </section>
 
               <section className="content-card">
-                <div className="section-heading"><div><h3>Share Timetable</h3><p>Copy courses and weekly slots between demo accounts.</p></div><Share2 size={20} /></div>
+                <div className="section-heading"><div><h3>Share Timetable</h3><p>Copy courses and weekly slots between accounts.</p></div><Share2 size={20} /></div>
                 <button className="primary-button" onClick={generateShareCode}><Share2 size={16} /> Generate Share Code</button>
                 {shareCode && <div className="share-code"><strong>{shareCode}</strong><button onClick={() => navigator.clipboard.writeText(shareCode)}><Copy size={17} /></button></div>}
                 <div className="stacked-form section-spaced">
@@ -1231,7 +1012,7 @@ function App() {
                   <input placeholder="Enter share code" value={importCode} onChange={e => setImportCode(e.target.value)} />
                   <button className="secondary-button" onClick={importSharedTimetable}>Import Timetable</button>
                 </div>
-                <p className="muted small-text">Sharing works within the same browser. Real cross-device sharing requires the backend.</p>
+                <p className="muted small-text">Share codes can be used across devices and accounts.</p>
               </section>
             </div>
           </>
@@ -1326,7 +1107,7 @@ function App() {
               {[...data.attendance].sort((a, b) => b.date.localeCompare(a.date)).map(item => (
                 <div className="simple-list-item" key={item.id}>
                   <span>{getCourse(item.courseId)?.code} · {item.date} · <strong>{item.status}</strong></span>
-                  <button onClick={() => updateData({ attendance: data.attendance.filter(entry => entry.id !== item.id) })}><Trash2 size={16} /></button>
+                  <button onClick={() => void refreshAfter(() => api.delete(`/attendance/${item.id}`), "Attendance removed.")}><Trash2 size={16} /></button>
                 </div>
               ))}
             </section>
@@ -1341,7 +1122,7 @@ function App() {
                 <label>Full Name</label>
                 <input name="profileName" required defaultValue={user.name} />
                 <label>Email Address</label>
-                <input name="profileEmail" type="email" required defaultValue={user.email} />
+                <input name="profileEmail" type="email" required value={user.email} readOnly title="Email changes are not supported by the current backend" />
                 <button className="primary-button" type="submit"><Save size={17} /> Save Changes</button>
               </form>
             </section>
@@ -1351,12 +1132,7 @@ function App() {
                 <button className="secondary-button" onClick={() => downloadFile(
                   JSON.stringify(data, null, 2), "semestersync-backup.json", "application/json"
                 )}><Download size={17} /> Export Backup</button>
-                <button className="danger-button" onClick={() => {
-                  if (window.confirm("Delete all your academic data? This cannot be undone.")) {
-                    setData({ courses: [], slots: [], exceptions: [], makeupClasses: [], deadlines: [], attendance: [] });
-                    notify("Academic data reset successfully.");
-                  }
-                }}><Trash2 size={17} /> Reset Academic Data</button>
+                <button className="danger-button" onClick={() => void resetAcademicData()}><Trash2 size={17} /> Reset Academic Data</button>
               </div>
             </section>
           </>
