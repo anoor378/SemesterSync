@@ -1,0 +1,12 @@
+import mongoose from 'mongoose';
+const {Schema,model}=mongoose;
+const base={owner:{type:Schema.Types.ObjectId,ref:'User',required:true,index:true}};
+export const User=model('User',new Schema({name:{type:String,required:true,trim:true},email:{type:String,required:true,unique:true,lowercase:true,trim:true},password:{type:String,required:true}},{timestamps:true}));
+export const Course=model('Course',new Schema({...base,code:{type:String,required:true,trim:true},name:{type:String,required:true,trim:true},color:{type:String,default:'#8974e8'}},{timestamps:true}));
+export const ClassSlot=model('ClassSlot',new Schema({...base,courseId:{type:Schema.Types.ObjectId,ref:'Course',required:true},day:{type:String,required:true},start:{type:String,required:true},end:{type:String,required:true},room:{type:String,default:''}},{timestamps:true}));
+export const ClassException=model('ClassException',new Schema({...base,slotId:{type:Schema.Types.ObjectId,ref:'ClassSlot',required:true},date:{type:String,required:true}},{timestamps:true}));
+export const MakeupClass=model('MakeupClass',new Schema({...base,courseId:{type:Schema.Types.ObjectId,ref:'Course',required:true},date:{type:String,required:true},start:{type:String,required:true},end:{type:String,required:true},room:{type:String,default:''}},{timestamps:true}));
+export const Deadline=model('Deadline',new Schema({...base,courseId:{type:Schema.Types.ObjectId,ref:'Course',required:true},title:{type:String,required:true},type:{type:String,enum:['Assignment','Exam','Quiz','Project'],required:true},dueDate:{type:String,required:true},dueTime:{type:String,required:true},completed:{type:Boolean,default:false}},{timestamps:true}));
+export const Attendance=model('Attendance',new Schema({...base,courseId:{type:Schema.Types.ObjectId,ref:'Course',required:true},sessionId:{type:String,required:true},date:{type:String,required:true},status:{type:String,enum:['Present','Absent'],required:true}},{timestamps:true}));
+Attendance.schema.index({owner:1,courseId:1,sessionId:1,date:1},{unique:true});
+export const SharedTimetable=model('SharedTimetable',new Schema({...base,code:{type:String,required:true,unique:true},courses:{type:Array,default:[]},slots:{type:Array,default:[]}},{timestamps:true}));

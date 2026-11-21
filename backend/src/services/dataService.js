@@ -1,0 +1,3 @@
+import {Course,ClassSlot,ClassException,MakeupClass,Deadline,Attendance} from '../models/index.js';
+export async function removeCourseTree(owner,id){const slots=await ClassSlot.find({owner,courseId:id}).select('_id');await Promise.all([ClassException.deleteMany({owner,slotId:{$in:slots.map(s=>s._id)}}),ClassSlot.deleteMany({owner,courseId:id}),MakeupClass.deleteMany({owner,courseId:id}),Deadline.deleteMany({owner,courseId:id}),Attendance.deleteMany({owner,courseId:id})]);await Course.deleteOne({_id:id,owner});}
+export const toClient=doc=>{const o=doc.toObject?doc.toObject():doc;const { _id,__v,owner,...rest}=o;return {id:String(_id),...Object.fromEntries(Object.entries(rest).map(([k,v])=>[k,k==='courseId'||k==='slotId'?String(v):v]))};};

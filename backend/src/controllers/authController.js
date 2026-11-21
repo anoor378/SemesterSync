@@ -1,0 +1,7 @@
+import bcrypt from 'bcryptjs';import jwt from 'jsonwebtoken';import {User} from '../models/index.js';import {bad,assertFields} from '../utils/validators.js';
+const safe=u=>({id:String(u._id),name:u.name,email:u.email});
+const tokenFor=u=>jwt.sign({id:String(u._id)},process.env.JWT_SECRET,{expiresIn:'7d'});
+export async function signup(req,res){assertFields(req.body,['name','email','password']);const {name,email,password}=req.body;if(typeof password!=='string'||password.length<8)bad('Password must contain at least 8 characters');if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))bad('Invalid email');if(await User.exists({email:email.toLowerCase()}))bad('Email already registered',409);const user=await User.create({name,email,password:await bcrypt.hash(password,10)});res.status(201).json({user:safe(user),token:tokenFor(user)});}
+export async function login(req,res){assertFields(req.body,['email','password']);const user=await User.findOne({email:String(req.body.email).toLowerCase()});if(!user||!await bcrypt.compare(req.body.password,user.password))bad('Invalid credentials',401);res.json({user:safe(user),token:tokenFor(user)});}
+export async function me(req,res){const user=await User.findById(req.user.id);if(!user)bad('User not found',404);res.json({user:safe(user)});}
+export async function updateProfile(req,res){const changes={};if(typeof req.body.name==='string'&&req.body.name.trim())changes.name=req.body.name.trim();const user=await User.findByIdAndUpdate(req.user.id,changes,{new:true,runValidators:true});res.json({user:safe(user)});}

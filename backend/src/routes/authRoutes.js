@@ -1,0 +1,1 @@
+import {Router} from 'express';import {auth} from '../middleware/auth.js';import {asyncHandler as h} from '../middleware/errors.js';import {signup,login,me,updateProfile} from '../controllers/authController.js';const r=Router();r.post('/signup',h(signup));r.post('/login',h(login));r.get('/me',auth,h(me));r.patch('/me',auth,h(updateProfile));export default r;
