@@ -9,6 +9,12 @@ import {
 } from "lucide-react";
 import "./App.css";
 import { api, getToken, setToken, clearToken, type AuthUser } from "./api/client";
+import {
+  useAppDispatch,
+  useAppSelector,
+  setAuthUser,
+  clearAuthUser
+} from "./store";
 
 // Types used throughout the application
 type Course = {
@@ -128,7 +134,16 @@ function downloadFile(content: string, filename: string, type: string) {
 }
 
 function App() {
-  const [user, setUser] = useState<AuthUser | null>(null);
+  const dispatch = useAppDispatch();
+  const user = useAppSelector(state => state.auth.user);
+
+  function setUser(nextUser: AuthUser | null) {
+    if (nextUser) {
+      dispatch(setAuthUser(nextUser));
+    } else {
+      dispatch(clearAuthUser());
+    }
+  }
   const [authLoading, setAuthLoading] = useState(Boolean(getToken()));
   const [data, setData] = useState<AcademicData>(EMPTY_DATA);
   const [loadedUser, setLoadedUser] = useState<string | null>(null);
@@ -466,102 +481,93 @@ function App() {
     );
   }
 
-  function parseCsv(content: string) {
-    const rows: string[][] = [];
-    let row: string[] = [];
-    let value = "";
-    let quoted = false;
-
-    for (let i = 0; i < content.length; i++) {
-      const char = content[i];
-      if (char === '"') {
-        if (quoted && content[i + 1] === '"') {
-          value += '"';
-          i++;
-        } else quoted = !quoted;
-      } else if (char === "," && !quoted) {
-        row.push(value.trim());
-        value = "";
-      } else if ((char === "\n" || char === "\r") && !quoted) {
-        if (char === "\r" && content[i + 1] === "\n") i++;
-        row.push(value.trim());
-        if (row.some(cell => cell)) rows.push(row);
-        row = [];
-        value = "";
-      } else {
-        value += char;
-      }
-    }
-
-    row.push(value.trim());
-    if (row.some(cell => cell)) rows.push(row);
-    if (quoted) throw new Error("CSV contains an unclosed quotation mark.");
-    return rows;
-  }
-
-  async function handleCsvUpload(event: ChangeEvent<HTMLInputElement>) {
+  async function handleCsvUpload(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
     const file = event.target.files?.[0];
+
     if (!file) return;
 
     try {
-      const text = (await file.text()).replace(/^\uFEFF/, "");
-      const rows = parseCsv(text);
-      const expected = ["course code", "course name", "day", "start", "end", "room"];
-      const headers = rows[0]?.map(item => item.toLowerCase()) ?? [];
+      const text = await file.text();
 
-      if (expected.some(header => !headers.includes(header))) {
-        throw new Error("CSV must include Course Code, Course Name, Day, Start, End and Room.");
-      }
+      const result = await api.post<{
+        rows: Array<{
+          code: string;
+          name: string;
+          day: string;
+          start: string;
+          end: string;
+          room: string;
+          errors: string[];
+        }>;
+        valid: boolean;
+      }>("/import/preview", { csv: text });
 
-      const index = (name: string) => headers.indexOf(name);
-      const preview: CsvRow[] = [];
-
-      for (const values of rows.slice(1)) {
-        const row: CsvRow = {
-          code: (values[index("course code")] ?? "").toUpperCase(),
-          name: values[index("course name")] ?? "",
-          day: values[index("day")] ?? "",
-          start: values[index("start")] ?? "",
-          end: values[index("end")] ?? "",
-          room: values[index("room")] ?? "",
-          error: ""
-        };
-
-        const timeFormat = /^([01]\d|2[0-3]):[0-5]\d$/;
-
-        if (!row.code || !row.name) row.error = "Missing course details";
-        else if (!DAYS.includes(row.day)) row.error = "Invalid weekday";
-        else if (!timeFormat.test(row.start) || !timeFormat.test(row.end)) {
-          row.error = "Use HH:MM time format";
-        } else if (row.start >= row.end) row.error = "Invalid time range";
-        else if (data.courses.some(course =>
-          course.code === row.code && course.name !== row.name
-        )) row.error = "Course code already has another name";
-        else if (hasClash(row.day, row.start, row.end)) {
-          row.error = "Clashes with existing timetable";
-        } else if (preview.some(previous =>
-          !previous.error && previous.day === row.day &&
-          overlaps(row.start, row.end, previous.start, previous.end)
-        )) row.error = "Clashes with another CSV row";
-
-        preview.push(row);
-      }
+      const preview: CsvRow[] = result.rows.map(row => ({
+        code: row.code,
+        name: row.name,
+        day: row.day,
+        start: row.start,
+        end: row.end,
+        room: row.room,
+        error: row.errors.join(", ")
+      }));
 
       setCsvRows(preview);
-      notify(`CSV preview ready: ${preview.length} rows.`);
+
+      const invalidCount = preview.filter(
+        row => Boolean(row.error)
+      ).length;
+
+      if (invalidCount > 0) {
+        notify(
+          `${invalidCount} CSV row(s) need correction.`,
+          true
+        );
+      } else {
+        notify(
+          `CSV preview ready: ${preview.length} valid rows.`
+        );
+      }
     } catch (err) {
-      notify(err instanceof Error ? err.message : "Could not read CSV.", true);
+      setCsvRows([]);
+      notify(errorMessage(err), true);
+    } finally {
+      event.target.value = "";
     }
-    event.target.value = "";
   }
 
   async function confirmCsvImport() {
-    const valid = csvRows.filter(row => !row.error).map(row => ({code: row.code, name: row.name, day: row.day, start: row.start, end: row.end, room: row.room}));
-    if (!valid.length) return notify("No valid rows to import.", true);
-    const ok = await refreshAfter(() => api.post('/import/confirm', {rows: valid}), `${valid.length} classes imported successfully.`);
-    if (ok) setCsvRows([]);
-  }
+    if (!csvRows.length) {
+      return notify("Upload a CSV file first.", true);
+    }
 
+    if (csvRows.some(row => Boolean(row.error))) {
+      return notify(
+        "Fix all invalid CSV rows before importing.",
+        true
+      );
+    }
+
+    const rows = csvRows.map(row => ({
+      code: row.code,
+      name: row.name,
+      day: row.day,
+      start: row.start,
+      end: row.end,
+      room: row.room
+    }));
+
+    const ok = await refreshAfter(
+      () => api.post("/import/confirm", { rows }),
+      `${rows.length} classes imported successfully.`
+    );
+
+    if (ok) {
+      setCsvRows([]);
+    }
+  }
   async function generateShareCode() {
     if (!data.courses.length) return notify("Add courses before sharing.", true);
     try {
@@ -998,7 +1004,7 @@ function App() {
                         </div>
                       ))}
                     </div>
-                    <button className="primary-button" onClick={confirmCsvImport}>Import Valid Rows</button>
+                    <button className="primary-button" onClick={confirmCsvImport} disabled={csvRows.some(row => Boolean(row.error))}>Confirm CSV Import</button>
                   </>
                 )}
               </section>
