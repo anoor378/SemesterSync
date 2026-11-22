@@ -1,7 +1,85 @@
-export const days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-export const isTime = v => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
-export const isDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v+'T12:00:00Z'));
-export const overlaps = (a,b) => a.start < b.end && a.end > b.start;
-export function assertFields(obj, fields) { for (const field of fields) if (obj[field] === undefined || obj[field] === null || obj[field] === '') { const e = new Error(`${field} is required`); e.status=400; throw e; } }
-export function assertTimeRange(start,end) { if(!isTime(start)||!isTime(end)||start>=end) {const e=new Error('Invalid time range');e.status=400;throw e;} }
-export function bad(message,status=400) {const e=new Error(message);e.status=status;throw e;}
+
+export const days = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+export const isTime = (value) => {
+  return (
+    typeof value === "string" &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
+  );
+};
+
+export const isDate = (value) => {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(value)
+  ) {
+    return false;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+};
+
+export const overlaps = (first, second) => {
+  if (!first || !second) {
+    return false;
+  }
+
+  return (
+    first.start < second.end &&
+    first.end > second.start
+  );
+};
+
+export function bad(message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  throw error;
+}
+
+export function assertFields(object, fields) {
+  if (
+    !object ||
+    typeof object !== "object" ||
+    Array.isArray(object)
+  ) {
+    bad("Request body must be a valid object");
+  }
+
+  for (const field of fields) {
+    const value = object[field];
+
+    if (
+      value === undefined ||
+      value === null ||
+      (typeof value === "string" && !value.trim())
+    ) {
+      bad(`${field} is required`);
+    }
+  }
+}
+
+export function assertTimeRange(start, end) {
+  if (!isTime(start) || !isTime(end)) {
+    bad("Time must use HH:MM format");
+  }
+
+  if (start >= end) {
+    bad("End time must be later than start time");
+  }
+}
